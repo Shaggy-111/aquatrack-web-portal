@@ -3,6 +3,13 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from './config'; 
 import Reports from './pages/Reports';
+import usePermissions, { clearPermissionsCache } from './hooks/usePermissions';
+import { PERMISSIONS } from './permissions';
+import BackendSidebarItems from './components/BackendSidebarItems';
+import { clearSidebarCache } from './hooks/useSidebar';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import LogoutConfirmationDialog from './components/LogoutConfirmationDialog';
+
 
 // --- Configuration ---
 const BOTTLE_PRICE = 42; 
@@ -11,12 +18,19 @@ const BOTTLE_PRICE = 42;
 const backendToUiStatus = (s) => {
     if (!s) return 'Unknown';
     const status = s.toLowerCase();
+    
     if (status === 'pending') return 'Pending';
-    if (status === 'accepted') return 'Accepted';
+    
+    // Change Accepted or Assigned_to_manager to "Assign to Delivery Partner"
+    if (status === 'accepted' || status === 'assigned_to_manager') return 'Assign to Delivery Partner';
+    
     if (status === 'in_transit') return 'In Transit';
-    if (status === 'delivered') return 'Delivered';
-    if (status === 'resolved' || status === 'delivered_confirmed') return 'Resolved'; // Use 'Resolved' for UI
+    
+    // Change Resolved or Delivered_Confirmed to "Delivered"
+    if (status === 'delivered' || status === 'resolved' || status === 'delivered_confirmed') return 'Delivered';
+    
     if (status === 'cancelled') return 'Cancelled';
+    
     return s;
 };
 
@@ -30,52 +44,98 @@ const exportOrdersToCSV = (orders, channelName) => {
     const headers = [
         "Order ID",
         "Store Name",
-        "Bottles",
-        "Status",
-        "Ordered By (Partner)",
+        "Order Bottles",
+        "Ordered By",
         "Order Date",
+        "Delivery By",
+        "Delivered Bottles",
+        "Delivery Date",
+        "Vehicle",
+        "Status",
+        "Proof (Photo URL)"
     ];
 
     const csvData = orders.map(order => {
-        const escape = (value) => `"${String(value).replace(/"/g, '""')}"`;
-        
+        const escape = (value) => `"${String(value ?? 'N/A').replace(/"/g, '""')}"`;
+
         return [
             escape(`#${order.id}`),
-            escape(order.customerName),
+
+            // ✅ FIX (no undefined)
+            escape(order.storeName || 'N/A'),
+
             order.bottles,
-            escape(order.status),
-            escape(order.partnerName),
-            escape(order.orderDate.toLocaleString()),
+
+            escape(order.partnerName || 'N/A'),
+
+            escape(order.formattedOrderDate || 'N/A'),
+
+            escape(order.deliveryPartnerName || 'Not Assigned'),
+
+            order.deliveredBottles || 0,
+
+            escape(
+                order.deliveryDate
+                    ? new Date(order.deliveryDate).toLocaleString('en-IN', {
+                        timeZone: 'Asia/Kolkata',
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    })
+                    : 'Not Delivered'
+            ),
+
+            escape(order.vehicleInfo || 'N/A'),
+
+            escape(order.status || 'N/A'),
+
+            // ✅ Photo link
+            escape(
+                order.deliveryPhoto
+                    ? `${API_BASE_URL}${order.deliveryPhoto}`
+                    : 'N/A'
+            )
         ].join(',');
     });
 
     const csvContent = [headers.join(','), ...csvData].join('\n');
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
 
     const today = new Date().toISOString().slice(0, 10);
-    const filename = `${channelName}_Orders_Export_${today}.csv`;
+    const filename = `${channelName}_Orders_${today}.csv`;
 
     link.href = URL.createObjectURL(blob);
     link.setAttribute('download', filename);
+
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
     URL.revokeObjectURL(link.href);
-    alert('Orders exported to CSV successfully!');
+
+    alert('✅ Export done successfully!');
 };
 
 
 // --- Reusable Components ---
 const StatCard = ({ label, value, icon, bgColor, textColor, onPress }) => (
-    <div 
-        style={{ ...styles.statCard, backgroundColor: bgColor, color: textColor }} 
+    <div
+        style={{ ...styles.statCard, backgroundColor: bgColor, color: textColor }}
         onClick={onPress}
+        onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-6px)';
+            e.currentTarget.style.boxShadow = '0 10px 25px rgba(0,0,0,0.1)';
+        }}
     >
         <div style={styles.statIcon}>{icon}</div>
         <div style={styles.statContent}>
             <p style={styles.statValue}>{value}</p>
             <p style={styles.statLabel}>{label}</p>
+            
         </div>
     </div>
 );
@@ -84,7 +144,17 @@ const SidebarItem = ({ label, icon, name, active, onSelect }) => (
     <button
         key={name}
         style={{ ...styles.sidebarItem, ...(active ? styles.sidebarItemActive : {}) }}
+        
         onClick={() => onSelect(name)}
+
+        // 🔥 YAHAN ADD KARNA HAI
+        onMouseEnter={(e) => {
+            if (!active) e.currentTarget.style.backgroundColor = '#F3F4F6';
+        }}
+        onMouseLeave={(e) => {
+            if (!active) e.currentTarget.style.backgroundColor = 'transparent';
+        }}
+        title={label}
     >
         <span style={styles.sidebarIcon}>{icon}</span>
         <span style={styles.sidebarText}>{label}</span>
@@ -94,16 +164,49 @@ const SidebarItem = ({ label, icon, name, active, onSelect }) => (
 const Sidebar = ({ currentTab, onSelectTab, channelName }) => (
     <aside style={styles.sidebar}>
         <div style={styles.sidebarHeader}>
-            <p style={styles.sidebarHeaderTitle}>{channelName.toUpperCase()} Admin</p>
+            
+            <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: '2px'
+            }}>
+
+                {/* LOGO + NAME */}
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                }}>
+                    <span style={{ fontSize: '18px' }}>💧</span>
+
+                    <span style={{
+                        fontSize: '16px',
+                        fontWeight: '600',
+                        color: '#111827'
+                    }}>
+                        Veekay AquaTrack
+                    </span>
+                </div>
+
+                {/* SUBTITLE */}
+                <span style={{
+                    fontSize: '12px',
+                    color: '#6B7280'
+                }}>
+                    Customer Admin Portal
+                </span>
+
+            </div>
+
         </div>
         <nav style={styles.sidebarNav}>
-            <SidebarItem label="Dashboard" icon="🏠" name="dashboard" active={currentTab === 'dashboard'} onSelect={onSelectTab} />
-            <SidebarItem label="Orders" icon="📦" name="orders" active={currentTab === 'orders'} onSelect={onSelectTab} />
-            <SidebarItem label="Unassigned Orders" icon="🚫" name="unassignedOrders" active={currentTab === 'unassignedOrders'} onSelect={onSelectTab} />
-            <SidebarItem label="Stores" icon="🏬" name="stores" active={currentTab === 'stores'} onSelect={onSelectTab} />
-            <SidebarItem label="My POC" icon="🤝" name="partners" active={currentTab === 'partners'} onSelect={onSelectTab} />
-            <SidebarItem label="Complaints" icon="💬" name="complaints" active={currentTab === 'complaints'} onSelect={onSelectTab} />           
-            <SidebarItem label="Reports" icon="📊" name="reports" active={currentTab === 'reports'} onSelect={onSelectTab} />
+            <BackendSidebarItems
+                currentTab={currentTab}
+                onSelectTab={onSelectTab}
+                renderGroup={(group) => <p key={group} style={styles.sidebarGroup}>{group}</p>}
+                renderItem={({ key, ...item }) => <SidebarItem key={key} {...item} onSelect={onSelectTab} />}
+            />
         </nav>
     </aside>
 );
@@ -148,18 +251,79 @@ const ComplaintResolutionModal = ({ isVisible, onClose, onSubmit, complaint, sol
     );
 };
 
+
+const OrderCard = ({ order }) => {
+    const statusColor = order.status === 'Delivered' ? '#2E7D32' : order.status === 'Pending' ? '#EF6C00' : '#1565C0';
+
+    return (
+        <div style={styles.orderCard}>
+            <div style={styles.cardHeader}>
+                <span style={styles.orderId}>Order #{order.id}</span>
+                <span style={{ ...styles.cardStatus, backgroundColor: statusColor }}>
+                    {order.status}
+                </span>
+            </div>
+            
+            <div style={styles.cardBody}>
+                <div style={styles.infoRow}>
+                    <span style={styles.infoLabel}>Store ID:</span>
+                    <span style={styles.infoValue}>{order.storeId}</span>
+                </div>
+                <div style={styles.infoRow}>
+                    <span style={styles.infoLabel}>Store Name:</span>
+                    <span style={styles.infoValue}>{order.storeName}</span>
+                </div>
+                <div style={styles.infoRow}>
+                    <span style={styles.infoLabel}>Store POC:</span>
+                    <span style={{...styles.infoValue, color: '#00796B', fontWeight: 'bold'}}>{order.pocName}</span>
+                </div>
+                <div style={styles.infoRow}>
+                    <span style={styles.infoLabel}>Delivery Partner:</span>
+                    <span style={{...styles.infoValue, color: '#1565C0'}}>{order.deliveryPartnerName}</span>
+                </div>
+                
+                <hr style={styles.divider} />
+                
+                <div style={styles.infoRow}>
+                    <span style={styles.infoLabel}>Order Date:</span>
+                    <span style={styles.dateValue}>{order.formattedOrderDate}</span>
+                </div>
+                <div style={styles.infoRow}>
+                    <span style={styles.infoLabel}>Delivery Date:</span>
+                    <span style={order.deliveryDate ? styles.dateValue : styles.notDelivered}>
+                        {order.deliveryDate ? order.deliveryDate.toLocaleString() : '❌ Not Delivered Yet'}
+                    </span>
+                </div>
+            </div>
+            
+            <div style={styles.cardFooter}>
+                <span style={styles.bottleBadge}>🧴 {order.bottles} Bottles</span>
+            </div>
+        </div>
+    );
+};
+
 const ChannelAdminDashboard = () => {
+    const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
+    const { hasPermission } = usePermissions();
     const [loading, setLoading] = useState(true);
     const [currentTab, setCurrentTab] = useState('dashboard');
     const [channelName, setChannelName] = useState(localStorage.getItem('channel_name') || "CHANNEL"); 
+    const [cityFilter, setCityFilter] = useState("ALL");
     
     // Data states for tabs
     const [storesList, setStoresList] = useState([]);
+    const [statusFilter, setStatusFilter] = useState('ALL'); // Default show all
     const [partnersList, setPartnersList] = useState([]);
     const [channelOrders, setChannelOrders] = useState([]); 
     const [channelComplaints, setChannelComplaints] = useState([]);
     const [reports, setReports] = useState([]);
     const [reportsTab, setReportsTab] = useState("monthly");
+    const [previewImage, setPreviewImage] = useState(null);
+    const [startDate, setStartDate] = useState('');
+    const [search, setSearch] = useState('');
+    const [endDate, setEndDate] = useState('');
+    
     
 
     const [dashboardData, setDashboardData] = useState({
@@ -172,12 +336,27 @@ const ChannelAdminDashboard = () => {
     const navigate = useNavigate();
 
     const orphanedOrders = useMemo(() => {
-        // Orders from stores within this channel that have no assigned manager
-        return channelOrders.filter(order => {
-            const store = storesList.find(s => s.id === order.store_id);
-            return store && !store.assigned_manager_id && order.status !== 'Delivered';
-        });
-    }, [channelOrders, storesList]);
+
+    return channelOrders.filter(order => {
+
+        // ✅ find store (IMPORTANT FIX)
+        const store = storesList.find(s => s.id === order.storeId);
+
+        if (!store) return false;
+
+        // ✅ city filter apply
+        if (cityFilter !== "ALL" && store.city !== cityFilter) {
+            return false;
+        }
+
+        // ✅ orphan logic
+        return (
+            !store.assigned_manager_id &&
+            order.status !== 'Delivered'
+        );
+    });
+
+}, [channelOrders, storesList, cityFilter]);
 
     // Complaint Resolution States
     const [selectedComplaint, setSelectedComplaint] = useState(null);
@@ -190,6 +369,29 @@ const ChannelAdminDashboard = () => {
     const [newPartnerEmail, setNewPartnerEmail] = useState("");
     const [newPartnerPassword, setNewPartnerPassword] = useState("");
     const [newPartnerMobile, setNewPartnerMobile] = useState("");
+    const [dateFilter, setDateFilter] = useState("ALL");
+
+
+    const getFilteredByDate = (orders) => {
+    if (dateFilter === "ALL") return orders;
+
+    const now = new Date();
+
+    return orders.filter(order => {
+        if (!order.orderDate) return false;
+
+        const orderDate = new Date(order.orderDate);
+
+        const diffDays = (now - orderDate) / (1000 * 60 * 60 * 24);
+
+        if (dateFilter === "YESTERDAY") return diffDays >= 1 && diffDays < 2;
+        if (dateFilter === "7DAYS") return diffDays <= 7;
+        if (dateFilter === "15DAYS") return diffDays <= 15;
+        if (dateFilter === "30DAYS") return diffDays <= 30;
+
+        return true;
+    });
+};
 
 
 
@@ -206,6 +408,8 @@ const ChannelAdminDashboard = () => {
     // --- Logout Handler ---
     const handleLogout = () => {
         ['auth_token', 'userToken', 'partner_token', 'user_role', 'channel_name'].forEach(key => localStorage.removeItem(key));
+        clearPermissionsCache();
+        clearSidebarCache();
         alert('You have been logged out.');
         navigate('/login'); 
     };
@@ -261,6 +465,15 @@ const ChannelAdminDashboard = () => {
         } finally {
             setLoading(false);
         }
+    };
+
+
+    const openImageModal = (img) => {
+        setPreviewImage(`${API_BASE_URL}${img}`);
+    };
+
+    const closeImageModal = () => {
+        setPreviewImage(null);
     };
 
     // --- Core Action: Fetch Complaints for this Channel ---
@@ -326,6 +539,12 @@ const ChannelAdminDashboard = () => {
         setSolutionText('');
     };
 
+
+    const uniqueCities = useMemo(() => {
+        const cities = channelOrders.map(o => o.city).filter(Boolean);
+        return ["ALL", ...new Set(cities)];
+    }, [channelOrders]);
+
     const handleComplaintResolveSubmit = async (e) => {
         e.preventDefault();
 
@@ -365,82 +584,204 @@ const ChannelAdminDashboard = () => {
     };
 
     // --- Data Fetching Function ---
-    const fetchData = (token, currentChannel) => {
-        setLoading(true);
+   const fetchData = (token, currentChannel) => {
+    setLoading(true);
 
-        // Fetch Dashboard Data (Orders, Stores, Partners)
-        const dashboardPromise = axios
-            .get(`${API_BASE_URL}/channel-admin/channel-admin/me/dashboard`, {
-                headers: { Authorization: `Bearer ${token}` },
-            })
-            .then((response) => {
-                const data = response.data;
-                const fetchedOrders = data.orders || [];
-                const fetchedPartners = data.partners || [];
-                const fetchedStores = data.stores || [];
+    if (!token) {
+        console.error("❌ No token found");
+        handleLogout();
+        return;
+    }
 
-                // Calculate KPIs
-                const pendingOrders = fetchedOrders.filter(o => o.status?.toLowerCase() === 'pending').length;
-
-                setDashboardData(prev => ({
-                    ...prev,
-                    totalStores: data.total_stores || 0,
-                    totalPartners: data.total_partners || 0,
-                    totalOrders: fetchedOrders.length || 0, 
-                    pendingOrders: pendingOrders,
-                }));
-
-                // Prepare Partner List
-                setPartnersList(fetchedPartners); 
-                
-                // Prepare Orders List
-                const mappedOrders = fetchedOrders.map(order => ({
-                    id: order.id,
-                    bottles: order.bottles,
-                    status: backendToUiStatus(order.status),
-                    orderDate: new Date(order.created_at),
-                    customerName: order.store?.store_name || order.customer_name || 'Customer', // Fallback for customer name
-                    partnerName: order.partner?.full_name || 'N/A',
-                    isPartnerOrder: !!order.partner_id,
-                    store_id: order.store_id,
-                }));
-                setChannelOrders(mappedOrders);
-
-                // Prepare Stores List: Integrate Partner name(s) and order count
-                const mappedStores = fetchedStores.map(store => {
-                    const assignedPartners = fetchedPartners.filter(partner => 
-                        partner.stores && partner.stores.some(s => s.id === store.id)
-                    );
-
-                    return {
-                        ...store,
-                        partner_name: store.assigned_manager_name || store.assigned_manager_id || "Unassigned",
-                        order_count: mappedOrders.filter(o => o.store_id === store.id).length || 0, 
-                    };
-                });
-                setStoresList(mappedStores);
-            });
-            
-        // Fetch Complaints (parallel fetch)
-        const complaintsPromise = fetchChannelComplaints(token);
-
-        Promise.all([dashboardPromise, complaintsPromise])
-            .catch((error) => {
-                console.error(
-                    `[DASHBOARD FETCH FAILED]: Status ${error.response?.status}`,
-                    error.response?.data || error.message
-                );
-                if (error.response?.status === 401) handleLogout();
-                alert(`DATA LOADING FAILED! Check console for API error.`);
-            })
-            .finally(() => {
-                setLoading(false);
-            });
+    const headers = {
+        Authorization: `Bearer ${token}`
     };
+
+    const dashboardPromise = axios
+        .get(`${API_BASE_URL}/channel-admin/channel-admin/me/dashboard`, {
+            headers
+        })
+        .then((response) => {
+
+            const data = response.data || {};
+
+            const fetchedOrders = data.orders || [];
+            const fetchedPartners = data.partners || [];
+            const fetchedStores = data.stores || [];
+
+            // ✅ KPIs
+            const pendingOrders = fetchedOrders.filter(
+                o => o.status?.toLowerCase() === 'pending'
+            ).length;
+
+            setDashboardData(prev => ({
+                ...prev,
+                totalStores: data.total_stores || 0,
+                totalPartners: data.total_partners || 0,
+                totalOrders: fetchedOrders.length,
+                pendingOrders
+            }));
+
+            setPartnersList(fetchedPartners);
+
+            // 🔥 FIXED MAPPING (IMPORTANT)
+            const mappedOrders = fetchedOrders.map(order => {
+
+    // 🔥 ROBUST STORE MATCH (VERY IMPORTANT FIX)
+    const store = fetchedStores.find(s =>
+        String(s.id) === String(order.store_id) ||
+        String(s.store_code) === String(order.store_id) ||
+        String(s.store_name)?.toLowerCase() === String(order.store_name)?.toLowerCase()
+    );
+
+    // ✅ SAFE CITY
+    const city = store?.city || order.city || "N/A";
+
+    // 🔥 SAFE DATE PARSING
+    const rawOrderDate = order.order_date ? new Date(order.order_date) : null;
+    const rawCreatedAt = order.created_at ? new Date(order.created_at) : null;
+    const rawDeliveredAt = order.delivered_at ? new Date(order.delivered_at) : null;
+
+    // 🔥 BACKDATE CHECK
+    const isBackdated =
+        rawOrderDate &&
+        rawCreatedAt &&
+        rawOrderDate.toDateString() !== rawCreatedAt.toDateString();
+
+    // 🔥 FINAL ORDER DATE
+    let finalOrderDate = null;
+
+    if (rawOrderDate && !isNaN(rawOrderDate)) {
+        finalOrderDate = new Date(
+            rawOrderDate.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+        );
+
+        if (isBackdated) {
+            finalOrderDate.setHours(0, 0, 0, 0);
+        }
+    }
+
+    // 🔥 FINAL DELIVERY DATE
+    let finalDeliveryDate = null;
+
+    if (isBackdated && finalOrderDate) {
+        finalDeliveryDate = new Date(finalOrderDate);
+    } else if (rawDeliveredAt && !isNaN(rawDeliveredAt)) {
+        finalDeliveryDate = new Date(rawDeliveredAt);
+    }
+
+    // 🔥 FORMAT FUNCTION (SAFE)
+    const formatIST = (date) => {
+        if (!date || isNaN(date)) return 'N/A';
+
+        return new Date(date).toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+        });
+    };
+
+    return {
+        id: order.id,
+
+        // 🔥 SAFE NUMBERS
+        bottles: Number(order.bottles) || 0,
+        deliveredBottles: Number(order.bottles_delivered) || 0,
+
+        status: backendToUiStatus(order.status),
+
+        // ✅ DATE
+        orderDate: finalOrderDate,
+        formattedOrderDate: formatIST(finalOrderDate),
+
+        deliveryDate: finalDeliveryDate,
+        formattedDeliveryDate: formatIST(finalDeliveryDate),
+
+        // 🔥 STORE FIX (IMPORTANT)
+        storeId: order.store_id || store?.id || 'N/A',
+        storeName: store?.store_name || order.store_name || 'Unknown Store',
+
+        // 🔥 CITY FIX
+        city: city,
+
+        // 🔥 ORDER TYPE
+        orderedBy: order.ordered_by_type || 'POC',
+
+        partnerName:
+            order.ordered_by_type === 'ADMIN'
+                ? 'Admin'
+                : (order.poc_name || 'N/A'),
+
+        // 🔥 DELIVERY FIX
+        deliveryPartnerName: order.delivered_by || 'Not Assigned',
+
+        // 🔥 VEHICLE
+        vehicleInfo: order.vehicle_info || 'N/A',
+
+        // 🔥 IMAGE
+        deliveryPhoto: order.delivery_photo_url || null
+    };
+});
+
+            setChannelOrders(mappedOrders);
+
+            // ✅ STORES
+            const mappedStores = fetchedStores.map(store => {
+
+    // 🔥 FIND PARTNERS LINKED TO THIS STORE (CORRECT LOGIC)
+    const assignedPartners = fetchedPartners.filter(partner =>
+        partner.stores &&
+        partner.stores.some(s => String(s.id) === String(store.id))
+    );
+
+    return {
+        ...store,
+
+        // ✅ POC NAME FIX (MAIN CHANGE)
+        partner_name:
+            assignedPartners.length > 0
+                ? assignedPartners.map(p => p.full_name).join(', ')
+                : "Unassigned",
+
+        // ✅ OPTIONAL (future use)
+        partner_ids: assignedPartners.map(p => p.id),
+
+        // 🔥 ORDER COUNT FIX (STRING SAFE)
+        order_count: mappedOrders.filter(
+            o => String(o.storeId) === String(store.id)
+        ).length
+    };
+});
+
+            setStoresList(mappedStores);
+        })
+        .catch((error) => {
+            console.error("❌ Dashboard API Error:", error);
+
+            if (error.response?.status === 401) {
+                console.log("🔐 Token expired → logout");
+                handleLogout();
+            }
+        });
+
+    const complaintsPromise = fetchChannelComplaints(token);
+
+    Promise.all([dashboardPromise, complaintsPromise])
+        .catch((error) => {
+            console.error("❌ FINAL ERROR:", error);
+        })
+        .finally(() => {
+            setLoading(false);
+        });
+};
 
     // --- Export Handler ---
     const handleExportOrdersToCSV = () => {
-        exportOrdersToCSV(channelOrders, channelName.toUpperCase());
+        exportOrdersToCSV(dateFilteredOrders, channelName.toUpperCase());
     };
 
     // --- Initial Data Fetch Effect ---
@@ -464,143 +805,460 @@ const ChannelAdminDashboard = () => {
 
     // --- Render Functions for Tabs ---
 
-    const renderDashboard = () => (
-        <div style={styles.contentArea}>
-            <h2 style={styles.pageTitle}>Dashboard Overview</h2>
+    const renderDashboard = () => {
 
+    // ✅ CITY FILTER (same as before)
+    let filteredOrders = cityFilter === "ALL"
+        ? channelOrders
+        : channelOrders.filter(o => o.city === cityFilter);
+
+    // ✅ DATE FILTER (NEW ADD)
+    filteredOrders = getFilteredByDate(filteredOrders);
+
+    // ✅ KPIs (same logic, just variable changed)
+    const deliveredOrders = filteredOrders.filter(o => o.status === 'Delivered').length;
+
+    const assignedOrders = filteredOrders.filter(o => 
+        o.status === 'Assign to Delivery Partner' || o.status === 'In Transit'
+    ).length;
+
+    const pendingOrders = filteredOrders.filter(o => 
+        o.status?.toLowerCase() === 'pending'
+    ).length;
+
+    // 🔥 GRAPH DATA (same, just filteredOrders use)
+    const chartData = filteredOrders
+        .filter(o => o.deliveryDate)
+        .sort((a, b) => new Date(b.deliveryDate) - new Date(a.deliveryDate))
+        .slice(0, 7)
+        .map((o) => ({
+            name: new Date(o.deliveryDate).toLocaleDateString('en-IN', {
+                day: '2-digit',
+                month: 'short'
+            }),
+            bottles: o.deliveredBottles || 0
+        }));
+
+    return (
+        <div style={styles.contentArea}>
+
+            <h2 style={styles.pageTitle}>
+                Dashboard Overview {cityFilter !== "ALL" && `(${cityFilter})`}
+            </h2>
+
+            {/* 🔥 FILTER BAR (CITY + DATE) */}
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '15px' }}>
+
+                {/* CITY FILTER */}
+                <select
+                    value={cityFilter}
+                    onChange={(e) => setCityFilter(e.target.value)}
+                    style={styles.filterDropdown}
+                >
+                    {uniqueCities.map(city => (
+                        <option key={city} value={city}>{city}</option>
+                    ))}
+                </select>
+
+                {/* ✅ DATE FILTER (NEW) */}
+                <select
+                    value={dateFilter}
+                    onChange={(e) => setDateFilter(e.target.value)}
+                    style={styles.filterDropdown}
+                >
+                    <option value="ALL">All Time</option>
+                    <option value="YESTERDAY">Yesterday</option>
+                    <option value="7DAYS">Last 7 Days</option>
+                    <option value="15DAYS">Last 15 Days</option>
+                    <option value="30DAYS">Last 30 Days</option>
+                </select>
+
+            </div>
+
+            {/* KPI */}
             <div style={styles.kpiRow}>
-                <StatCard 
-                    label={`Total Orders`} 
-                    value={dashboardData.totalOrders.toString()} 
-                    icon="📦" 
-                    bgColor="#E3F2FD" 
-                    textColor="#1565C0" 
-                    onPress={() => setCurrentTab('orders')}
-                />
-                <StatCard 
-                    label={`Pending Orders`} 
-                    value={dashboardData.pendingOrders.toString()} 
-                    icon="⏰" 
-                    bgColor="#FFF3E0" 
-                    textColor="#EF6C00" 
-                    onPress={() => setCurrentTab('orders')}
-                />
-                <StatCard 
-                    label={`Pending Complaints`} 
-                    value={dashboardData.pendingComplaints.toString()} 
-                    icon="🚨" 
-                    bgColor="#FFEBEE" 
-                    textColor="#D32F2F" 
-                    onPress={() => setCurrentTab('complaints')}
-                />
-                <StatCard 
-                    label={`Stores under ${channelName}`} 
-                    value={dashboardData.totalStores.toString()} 
-                    icon="🏬" 
-                    bgColor="#E8F5E9" 
-                    textColor="#388E3C" 
-                    onPress={() => setCurrentTab('stores')}
-                />
-            </div>
-            
-            {/* Recent Orders List Preview */}
-             <div style={styles.tableCard}>
-                <h3 style={styles.cardTitle}>Recent Orders</h3>
-                <table style={styles.dataTable}>
-                    <thead>
-                        <tr style={styles.tableHeaderRow}>
-                            <th style={styles.tableHeaderCell}>Order ID</th>
-                            <th style={styles.tableHeaderCell}>Store/Customer</th>
-                            <th style={styles.tableHeaderCell}>Bottles</th>
-                            <th style={styles.tableHeaderCell}>Status</th>
-                            <th style={styles.tableHeaderCell}>Order Date</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {channelOrders.slice(0, 5).sort((a, b) => b.orderDate - a.orderDate).map(order => (
-                            <tr key={order.id} style={styles.tableRow}>
-                                <td style={styles.tableCell}>#{order.id}</td>
-                                <td style={styles.tableCell}>{order.customerName}</td>
-                                <td style={styles.tableCell}>{order.bottles}</td>
-                                <td style={styles.tableCell}>
-                                    <span style={{
-                                        ...styles.statusBadge,
-                                        backgroundColor: 
-                                            order.status === 'Delivered' || order.status === 'Resolved' ? '#4CAF50' : 
-                                            order.status === 'Pending' ? '#FF9800' : 
-                                            order.status === 'Cancelled' ? '#D32F2F' : '#2196F3'
-                                    }}>
-                                        {order.status}
-                                    </span>
-                                </td>
-                                <td style={styles.tableCell}>{order.orderDate.toLocaleDateString()}</td>
-                            </tr>
-                        ))}
-                         {channelOrders.length === 0 && (
-                            <tr style={styles.tableRow}><td colSpan="5" style={{...styles.tableCell, textAlign: 'center'}}>No recent orders found for this channel.</td></tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    );
-    
-    // RENDER ORDERS TAB
-    const renderOrders = () => (
-        <div style={styles.contentArea}>
-            <h2 style={styles.pageTitle}>{channelName.toUpperCase()} Order History ({channelOrders.length})</h2>
-            
-            <button 
-                style={{...styles.button, backgroundColor: '#1565C0', maxWidth: '300px', marginBottom: '20px', alignSelf: 'flex-start'}}
-                onClick={handleExportOrdersToCSV}
-                disabled={loading || channelOrders.length === 0}
-            >
-                {loading ? 'Processing...' : 'Export All Orders to CSV'}
-            </button>
 
+                <StatCard label="Total Orders" value={filteredOrders.length} icon="📦" bgColor="#E3F2FD" textColor="#1565C0" onPress={() => setCurrentTab('orders')} />
+
+                <StatCard label="Pending Orders" value={pendingOrders} icon="⏰" bgColor="#FFF3E0" textColor="#EF6C00" onPress={() => setCurrentTab('orders')} />
+
+                <StatCard label="Assigned Orders" value={assignedOrders} icon="🚚" bgColor="#E8EAF6" textColor="#3F51B5" onPress={() => setCurrentTab('orders')} />
+
+                <StatCard label="Delivered Orders" value={deliveredOrders} icon="✅" bgColor="#E8F5E9" textColor="#2E7D32" onPress={() => setCurrentTab('orders')} />
+
+                <StatCard label="Pending Complaints" value={dashboardData.pendingComplaints} icon="🚨" bgColor="#FFEBEE" textColor="#D32F2F" onPress={() => setCurrentTab('complaints')} />
+
+                <StatCard label={`Stores (${channelName})`} value={dashboardData.totalStores} icon="🏬" bgColor="#E0F2F1" textColor="#00796B" onPress={() => setCurrentTab('stores')} />
+
+            </div>
+
+            {/* GRAPH + INSIGHTS */}
+            <div style={{
+                display: 'grid',
+                gridTemplateColumns: '2fr 1fr',
+                gap: '20px',
+                marginBottom: '25px'
+            }}>
+
+                {/* GRAPH */}
+                <div style={styles.tableCard}>
+                    <h3 style={styles.cardTitle}>📊 Orders Trend</h3>
+
+                    <ResponsiveContainer width="100%" height={250}>
+                        <LineChart data={chartData}>
+                            <XAxis dataKey="name" />
+                            <YAxis />
+                            <Tooltip />
+                            <Line type="monotone" dataKey="bottles" stroke="#4CAF50" strokeWidth={3} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </div>
+
+                {/* QUICK STATS */}
+                <div style={styles.tableCard}>
+                    <h3 style={styles.cardTitle}>⚡ Quick Insights</h3>
+
+                    <div style={{ padding: '15px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div>📦 Total Orders: <b>{filteredOrders.length}</b></div>
+                        <div>✅ Delivered: <b>{deliveredOrders}</b></div>
+                        <div>🚚 In Transit: <b>{assignedOrders}</b></div>
+                        <div>⏰ Pending: <b>{pendingOrders}</b></div>
+                        <div>🚨 Complaints: <b>{dashboardData.pendingComplaints}</b></div>
+                    </div>
+                </div>
+
+            </div>
+
+            {/* 🔥 RECENT ORDERS (UNCHANGED) */}
             <div style={styles.tableCard}>
-                <h3 style={styles.cardTitle}>All Orders</h3>
-                <table style={styles.dataTable}>
-                    <thead>
-                        <tr style={styles.tableHeaderRow}>
-                            <th style={styles.tableHeaderCell}>Order ID</th>
-                            <th style={styles.tableHeaderCell}>Store Name</th>
-                            <th style={styles.tableHeaderCell}>Bottles</th>
-                            <th style={styles.tableHeaderCell}>Status</th>
-                            <th style={styles.tableHeaderCell}>Ordered By (Partner)</th>
-                            <th style={styles.tableHeaderCell}>Date</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {channelOrders.sort((a, b) => b.orderDate - a.orderDate).map(order => (
-                            <tr key={order.id} style={styles.tableRow}>
-                                <td style={styles.tableCell}>#{order.id}</td>
-                                <td style={styles.tableCell}>{order.customerName}</td>
-                                <td style={styles.tableCell}>{order.bottles}</td>
-                                <td style={styles.tableCell}>
-                                    <span style={{
-                                        ...styles.statusBadge,
-                                        backgroundColor: 
-                                            order.status === 'Delivered' || order.status === 'Resolved' ? '#4CAF50' : 
-                                            order.status === 'Pending' ? '#FF9800' : 
-                                            order.status === 'Cancelled' ? '#D32F2F' : '#2196F3'
-                                    }}>
-                                        {order.status}
-                                    </span>
-                                </td>
-                                <td style={styles.tableCell}>{order.partnerName}</td>
-                                <td style={styles.tableCell}>{order.orderDate.toLocaleString()}</td>
+                <h3 style={styles.cardTitle}>📦 Recent Orders</h3>
+
+                <div style={{ overflowX: "auto" }}>
+                    <table style={styles.dataTable}>
+
+                        <thead>
+                            <tr style={styles.tableHeaderRow}>
+                                <th style={styles.tableHeaderCell}>Order ID</th>
+                                <th style={styles.tableHeaderCell}>Store</th>
+                                <th style={styles.tableHeaderCell}>Order Bottles</th>
+                                <th style={styles.tableHeaderCell}>Ordered By</th>
+                                <th style={styles.tableHeaderCell}>Order Date</th>
+                                <th style={styles.tableHeaderCell}>Delivery By</th>
+                                <th style={styles.tableHeaderCell}>Delivered Bottles</th>
+                                <th style={styles.tableHeaderCell}>Delivery Date</th>
+                                <th style={styles.tableHeaderCell}>Vehicle</th>
+                                <th style={styles.tableHeaderCell}>Status</th>
+                                <th style={styles.tableHeaderCell}>Proof</th>
                             </tr>
-                        ))}
-                         {channelOrders.length === 0 && (
-                            <tr style={styles.tableRow}><td colSpan="6" style={{...styles.tableCell, textAlign: 'center'}}>{loading ? 'Loading...' : 'No orders found.'}</td></tr>
-                        )}
-                    </tbody>
-                </table>
+                        </thead>
+
+                        <tbody>
+                            {filteredOrders
+                                .sort((a, b) => b.orderDate - a.orderDate)
+                                .slice(0, 5)
+                                .map(order => (
+                                    <tr key={order.id} style={styles.tableRow}>
+                                        <td style={styles.tableCell}>#{order.id}</td>
+                                        <td style={styles.tableCell}>{order.storeName}</td>
+                                        <td style={styles.tableCell}>{order.bottles}</td>
+                                        <td style={styles.tableCell}>{order.partnerName}</td>
+                                        <td style={styles.tableCell}>{order.formattedOrderDate}</td>
+                                        <td style={styles.tableCell}>{order.deliveryPartnerName}</td>
+                                        <td style={styles.tableCell}>{order.deliveredBottles}</td>
+                                        <td style={styles.tableCell}>{order.formattedDeliveryDate}</td>
+                                        <td style={styles.tableCell}>{order.vehicleInfo}</td>
+                                        <td style={styles.tableCell}>{order.status}</td>
+                                        <td style={styles.tableCell}>View</td>
+                                    </tr>
+                                ))}
+                        </tbody>
+
+                    </table>
+                </div>
             </div>
+
         </div>
     );
+};
+    
 
+const dateFilteredOrders = useMemo(() => {
+    return channelOrders.filter(order => {
+
+        // ✅ only delivered orders consider karo (report sync)
+        if (!order.orderDate) return false;
+
+        if (!startDate && !endDate) return true;
+
+        const orderDate = new Date(order.orderDate);
+
+        // ✅ normalize dates (avoid time issues)
+        const start = startDate ? new Date(startDate + "T00:00:00") : null;
+        const end = endDate ? new Date(endDate + "T23:59:59") : null;
+
+        if (start && orderDate < start) return false;
+        if (end && orderDate > end) return false;
+
+        return true;
+    });
+}, [channelOrders, startDate, endDate]);
+    // RENDER ORDERS TAB
+const renderOrders = () => {
+
+    const filteredOrders = dateFilteredOrders
+        // ✅ CITY FILTER (ADDED ONLY THIS)
+        .filter(o => {
+            if (cityFilter === "ALL") return true;
+            return o.city === cityFilter;
+        })
+        // EXISTING CODE (UNCHANGED)
+        .filter(o => o.storeName?.toLowerCase().includes(search.toLowerCase()))
+        .filter(o => {
+            if (statusFilter === 'ALL') return true;
+
+            const s = o.status?.toLowerCase() || '';
+
+            if (statusFilter === 'PENDING') return s === 'pending';
+            if (statusFilter === 'TRANSIT') return s.includes('transit') || s.includes('partner');
+            if (statusFilter === 'DELIVERED') return s === 'delivered';
+
+            return true;
+        });
+
+    return (
+        <div style={styles.contentArea}>
+
+            {/* HEADER */}
+            <div style={styles.filterHeader}>
+                <h2 style={styles.pageTitle}>{channelName.toUpperCase()} Orders</h2>
+
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+
+    {/* LEFT SIDE FILTERS */}
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+
+                        {/* ✅ CITY DROPDOWN (ALREADY PRESENT - NO CHANGE) */}
+                        <select
+                            value={cityFilter}
+                            onChange={(e) => setCityFilter(e.target.value)}
+                            style={styles.filterDropdown}
+                        >
+                            {uniqueCities.map(city => (
+                                <option key={city} value={city}>
+                                    {city}
+                                </option>
+                            ))}
+                        </select>
+
+                        <select
+                            style={styles.filterDropdown}
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                        >
+                            <option value="ALL">Show All Orders</option>
+                            <option value="PENDING">🟡 Pending Only</option>
+                            <option value="TRANSIT">🔵 In Transit / Assigned</option>
+                            <option value="DELIVERED">🟢 Delivered Only</option>
+                        </select>
+
+                        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #ccc' }} />
+                        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #ccc' }} />
+
+                        <input
+                            placeholder="Search store..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            style={{ padding: '8px', borderRadius: '6px', border: '1px solid #ccc' }}
+                        />
+
+                        <button
+                            style={{
+                                padding: '10px 16px',
+                                backgroundColor: '#9E9E9E',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer'
+                            }}
+                            onClick={() => {
+                                setStatusFilter('ALL');
+                                setStartDate('');
+                                setEndDate('');
+                                setCityFilter('ALL'); // ✅ ADD THIS ONLY
+                            }}
+                        >
+                            🔄 Reset
+                        </button>
+                    </div>
+
+                    {/* 🔥 RIGHT SIDE EXPORT BUTTON */}
+                    <button
+                        style={{
+                            padding: '8px 16px',
+                            backgroundColor: '#1565C0',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '13px'
+                        }}
+                        onClick={handleExportOrdersToCSV}
+                    >
+                        📥 Export CSV
+                    </button>
+
+                </div>
+            </div>
+
+            {/* TABLE */}
+            <div style={styles.tableCard}>
+                <div style={{ overflowX: "auto" }}>
+
+                    <table style={styles.dataTable}>
+                        
+                        <thead>
+                            <tr style={styles.tableHeaderRow}>
+                                <th style={styles.tableHeaderCell}>Order ID</th>
+                                <th style={styles.tableHeaderCell}>Store</th>
+                                <th style={styles.tableHeaderCell}>Order Bottles</th>
+                                <th style={styles.tableHeaderCell}>Ordered By</th>
+                                <th style={styles.tableHeaderCell}>Order Date</th>
+                                <th style={styles.tableHeaderCell}>Delivery By</th>
+                                <th style={styles.tableHeaderCell}>Delivered Bottles</th>
+                                <th style={styles.tableHeaderCell}>Delivery Date</th>
+                                <th style={styles.tableHeaderCell}>Vehicle</th>
+                                <th style={styles.tableHeaderCell}>Status</th>
+                                <th style={styles.tableHeaderCell}>Proof</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            {filteredOrders.length > 0 ? (
+                                filteredOrders.map(order => (
+                                    <tr
+                                        key={order.id}
+                                        style={{
+                                            ...styles.tableRow,
+                                            backgroundColor:
+                                                order.status === 'Delivered'
+                                                    ? '#E8F5E9'
+                                                    : 'white'
+                                        }}
+                                    >
+
+                                        <td style={styles.tableCell}>#{order.id}</td>
+
+                                        <td style={styles.tableCell}>
+                                            <div style={{ fontWeight: '600' }}>{order.storeName || 'N/A'}</div>
+                                            <div style={{ fontSize: '12px', color: '#888' }}>{order.storeId}</div>
+                                        </td>
+
+                                        <td style={styles.tableCell}>{order.bottles}</td>
+
+                                        <td style={styles.tableCell}>{order.partnerName || 'N/A'}</td>
+
+                                        <td style={styles.tableCell}>{order.formattedOrderDate || 'N/A'}</td>
+
+                                        <td style={styles.tableCell}>{order.deliveryPartnerName || 'Not Assigned'}</td>
+
+                                        <td style={styles.tableCell}>{order.deliveredBottles || 0}</td>
+
+                                        <td style={styles.tableCell}>
+                                            {order.deliveryDate
+                                                ? new Date(order.deliveryDate).toLocaleString('en-IN', {
+                                                    timeZone: 'Asia/Kolkata',
+                                                    day: '2-digit',
+                                                    month: 'short',
+                                                    year: 'numeric',
+                                                    hour: '2-digit',
+                                                    minute: '2-digit'
+                                                })
+                                                : <span style={{ color: '#D32F2F', fontWeight: '600' }}>
+                                                    Not Delivered
+                                                </span>
+                                            }
+                                        </td>
+
+                                        <td style={styles.tableCell}>{order.vehicleInfo || 'N/A'}</td>
+
+                                        <td style={styles.tableCell}>
+                                            <span style={{
+                                                ...styles.statusBadge,
+                                                backgroundColor:
+                                                    order.status === 'Delivered' ? '#4CAF50' :
+                                                    order.status === 'Pending' ? '#FF9800' :
+                                                    '#2196F3'
+                                            }}>
+                                                {order.status}
+                                            </span>
+                                        </td>
+
+                                        <td style={styles.tableCell}>
+                                            {order.deliveryPhoto ? (
+                                                <span
+                                                    onClick={() => openImageModal(order.deliveryPhoto)}
+                                                    style={{
+                                                        color: '#1565C0',
+                                                        cursor: 'pointer',
+                                                        fontSize: '13px',
+                                                        textDecoration: 'underline'
+                                                    }}
+                                                >
+                                                    View
+                                                </span>
+                                            ) : 'N/A'}
+                                        </td>
+
+                                    </tr>
+                                ))
+                            ) : (
+                                <tr>
+                                    <td colSpan="11" style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                                        <div style={{ textAlign: 'center', padding: '40px' }}>
+                                            <h3>No Orders Found 😕</h3>
+                                            <p style={{ color: '#888' }}>Try changing filters or date</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+
+                    </table>
+                </div>
+            </div>
+
+            {/* IMAGE MODAL */}
+            {previewImage && (
+                <div
+                    onClick={closeImageModal}
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(0,0,0,0.7)',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        zIndex: 9999
+                    }}
+                >
+                    <img
+                        src={previewImage}
+                        alt="Proof"
+                        style={{
+                            maxWidth: '90%',
+                            maxHeight: '90%',
+                            borderRadius: '10px'
+                        }}
+                    />
+                </div>
+            )}
+
+        </div>
+    );
+};
     const renderStores = () => (
         <div style={styles.contentArea}>
             <h2 style={styles.pageTitle}>{channelName.toUpperCase()} Store Network ({storesList.length})</h2>
@@ -795,13 +1453,13 @@ const ChannelAdminDashboard = () => {
 
                 <td style={styles.tableCell}>
                   {c.status === "pending" ? (
-                    <button
+                    hasPermission(PERMISSIONS.COMPLAINTS_RESOLVE) ? <button
                       style={{ ...styles.actionButton, backgroundColor: "#1565C0" }}
                       onClick={() => handleResolveClick(c)}
                       disabled={resolvingComplaint}
                     >
                       Resolve
-                    </button>
+                    </button> : null
                   ) : (
                     <span style={{ fontWeight: "600", color: "#4CAF50" }}>
                       ✅ Resolved
@@ -858,7 +1516,8 @@ const ChannelAdminDashboard = () => {
                                 style={{
                                     ...styles.button,
                                     width: 'auto',
-                                    backgroundColor: reportsTab === "operational" ? '#4CAF50' : '#ccc'
+                                    backgroundColor: reportsTab === "operational" ? '#4CAF50' : 
+                                    '#ccc'
                                 }}
                                 onClick={() => setReportsTab("operational")}
                             >
@@ -898,7 +1557,7 @@ const ChannelAdminDashboard = () => {
                                                         </td>
                                                         <td style={styles.tableCell}>{formatReportMonth(r.report_date)}</td>
                                                         <td style={styles.tableCell}>
-                                                            <button
+                                                            {hasPermission(PERMISSIONS.REPORTS_DOWNLOAD) && <button
                                                                 style={{
                                                                     ...styles.actionButton,
                                                                     backgroundColor: '#1565C0',
@@ -909,7 +1568,7 @@ const ChannelAdminDashboard = () => {
                                                                 onClick={() => handleReportDownload(r.id)}
                                                             >
                                                                 <span>👁️</span> View PDF
-                                                            </button>
+                                                            </button>}
                                                         </td>
                                                     </tr>
                                                 ))
@@ -929,7 +1588,7 @@ const ChannelAdminDashboard = () => {
             case 'unassignedOrders':
                 return renderUnassignedOrders();
             default:
-                return renderDashboard();
+                return <p style={styles.loadingText}>This module is not implemented yet.</p>;
         }
     };
 
@@ -938,22 +1597,78 @@ const ChannelAdminDashboard = () => {
             <Sidebar currentTab={currentTab} onSelectTab={handleSelectTab} channelName={channelName} />
             
             <main style={styles.mainPanel}>
+
+                {/* 🔥 MODERN HEADER */}
                 <header style={styles.topHeader}>
-                    <h1 style={styles.headerTitle}>{channelName.toUpperCase()} Management Portal</h1>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                        <span style={{ fontWeight: '600', color: '#555', fontSize: '14px' }}>
-                            Admin User: {channelName}
+
+                    {/* LEFT SIDE */}
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <h1 style={styles.headerTitle}>
+                            👋 Welcome, {channelName}
+                        </h1>
+                        <span style={{ fontSize: '13px', color: '#777' }}>
+                            Manage your operations efficiently 🚀
                         </span>
-                        <button style={styles.logoutButton} onClick={handleLogout}>Logout</button>
+                    </div>
+
+                    {/* RIGHT SIDE */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+
+                        {/* USER INFO */}
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            background: '#F4F6F8',
+                            padding: '6px 12px',
+                            borderRadius: '20px'
+                        }}>
+                            <span style={{
+                                background: '#4CAF50',
+                                color: '#fff',
+                                width: '28px',
+                                height: '28px',
+                                borderRadius: '50%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '13px',
+                                fontWeight: 'bold'
+                            }}>
+                                {channelName?.charAt(0)}
+                            </span>
+
+                            <span style={{ fontWeight: '600', color: '#555', fontSize: '14px' }}>
+                                {channelName}
+                            </span>
+                        </div>
+
+                        {/* LOGOUT BUTTON */}
+                        <button
+                            style={{
+                                ...styles.logoutButton,
+                                padding: '8px 18px',
+                                borderRadius: '20px',
+                                boxShadow: '0 2px 6px rgba(0,0,0,0.1)'
+                            }}
+                            onClick={() => setLogoutDialogOpen(true)}
+                        >
+                            🚪 Logout
+                        </button>
+
                     </div>
                 </header>
+                <LogoutConfirmationDialog open={logoutDialogOpen} onCancel={() => setLogoutDialogOpen(false)} onConfirm={handleLogout} />
+
+                {/* CONTENT */}
                 <div style={styles.mainContentArea}>
                     {renderContent()}
                 </div>
+
             </main>
 
             {/* Global Complaint Modal */}
-            <ComplaintResolutionModal
+            {hasPermission(PERMISSIONS.COMPLAINTS_RESOLVE) && <ComplaintResolutionModal
                 isVisible={showResolveModal}
                 onClose={handleCloseModal}
                 onSubmit={handleComplaintResolveSubmit}
@@ -961,7 +1676,7 @@ const ChannelAdminDashboard = () => {
                 solutionText={solutionText}
                 setSolutionText={setSolutionText}
                 isLoading={resolvingComplaint}
-            />
+            />}
         </div>
     );
 };
@@ -969,21 +1684,68 @@ const ChannelAdminDashboard = () => {
 
 // --- Styles (Updated for modern look) ---
 const styles = {
-    dashboardLayout: { display: 'flex', minHeight: '100vh', width: '100vw', backgroundColor: '#F4F6F8', fontFamily: "'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" },
+    dashboardLayout: { display: 'flex', minHeight: '100vh', width: '100vw', backgroundColor: '#F8FAFC', fontFamily: "'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" },
     
     // Sidebar
-    sidebar: { width: '240px', backgroundColor: '#1A2A44', color: '#ECF0F1', padding: '20px 0', display: 'flex', flexDirection: 'column', boxShadow: '2px 0 10px rgba(0,0,0,0.1)', zIndex: 10, },
+    sidebar: {
+        width: '240px',
+        minWidth: '240px',
+        maxWidth: '240px',
+        flex: '0 0 240px',
+        height: '100vh',
+        backgroundColor: '#ffffff',
+        borderRight: '1px solid #E5E7EB',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+    },
     sidebarHeader: { padding: '0 20px 25px', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '15px', },
-    sidebarHeaderTitle: { fontSize: '24px', fontWeight: '800', color: '#00A896', margin: 0, },
-    sidebarNav: { flexGrow: 1, padding: '0 10px', },
-    sidebarItem: { display: 'flex', alignItems: 'center', padding: '12px 15px', borderRadius: '6px', marginBottom: '6px', backgroundColor: 'transparent', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', transition: 'background-color 0.2s ease, color 0.2s ease', fontSize: '15px', color: '#BDC3C7', },
-    sidebarItemActive: { backgroundColor: '#4CAF50', color: '#FFFFFF', fontWeight: '700', },
-    sidebarIcon: { fontSize: '18px', marginRight: '12px', },
-    sidebarText: { color: 'inherit', },
+    sidebarHeaderTitle: {
+        fontSize: '20px',
+        fontWeight: '600',
+        color: '#0F172A',
+    },
+    sidebarNav: { flexGrow: 1, padding: '0 10px', overflowY: 'auto', minHeight: 0, },
+    sidebarGroup: { margin: '16px 14px 8px', color: '#9CA3AF', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.08em' },
+    sidebarItem: {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '10px 14px',
+    borderRadius: '8px',
+    marginBottom: '6px',
+    backgroundColor: 'transparent',
+    border: 'none',
+    width: '100%',
+    boxSizing: 'border-box',
+    textAlign: 'left',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#6B7280',   // 🔥 softer gray (premium feel)
+    minHeight: '42px',
+    lineHeight: 1.25,
+},
+   sidebarItemActive: {
+    backgroundColor: '#EEF2FF',
+    color: '#4F46E5',
+    fontWeight: '600',
+},
+    sidebarIcon: { width: '20px', minWidth: '20px', fontSize: '18px', marginRight: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, },
+    sidebarText: { color: 'inherit', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', },
 
     // Header and Main Content
     mainPanel: { flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-    topHeader: { backgroundColor: '#FFFFFF', padding: '15px 30px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #E0E0E0', flexShrink: 0 },
+    topHeader: {
+    background: '#ffffff',
+    padding: '16px 28px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottom: '1px solid #E5E7EB'
+},
+
+    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
     headerTitle: { fontSize: '22px', fontWeight: '600', color: '#333', margin: 0 },
     logoutButton: { padding: '8px 16px', backgroundColor: '#E74C3C', color: '#FFFFFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', fontWeight: '600' },
     mainContentArea: { flexGrow: 1, padding: '20px 30px', overflowY: 'auto', backgroundColor: '#F4F6F8' },
@@ -993,23 +1755,56 @@ const styles = {
     
     // KPI Cards
     kpiRow: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px', marginBottom: '30px' },
-    statCard: { borderRadius: '10px', padding: '20px', display: 'flex', alignItems: 'center', gap: '15px', boxShadow: '0 2px 6px rgba(0,0,0,0.08)', cursor: 'pointer', transition: 'transform 0.2s ease', minHeight: '80px' },
+    statCard: {
+    borderRadius: '14px',
+    padding: '18px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '15px',
+    background: 'linear-gradient(135deg, #ffffff, #f9fafb)',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
+    border: '1px solid #E5E7EB',
+    cursor: 'pointer',
+    transition: 'all 0.25s ease'
+},
     statIcon: { fontSize: '32px' },
     statContent: { flex: 1 },
     statValue: { fontSize: '24px', fontWeight: 'bold', margin: '0' },
     statLabel: { fontSize: '13px', color: 'rgba(0,0,0,0.7)', margin: '0' },
     
     // Tables and Forms
-    tableCard: { backgroundColor: '#FFFFFF', borderRadius: '10px', boxShadow: '0 2px 6px rgba(0,0,0,0.08)', overflow: 'hidden', marginBottom: '30px', },
+    tableCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: '14px',
+    boxShadow: '0 6px 18px rgba(0,0,0,0.05)',
+    padding: '10px'
+},
     cardTitle: { fontSize: '20px', fontWeight: '600', color: '#333', padding: '20px', borderBottom: '1px solid #EEE', margin: 0 },
     dataTable: { width: '100%', borderCollapse: 'collapse', },
-    tableHeaderRow: { backgroundColor: '#4CAF50', color: '#FFFFFF', textAlign: 'left', },
+    tableHeaderRow: {
+    backgroundColor: '#111827',
+    color: '#fff'
+},
     tableHeaderCell: { padding: '15px 20px', fontWeight: '600', fontSize: '14px', },
-    tableRow: { borderBottom: '1px solid #F0F2F5', },
+   tableRow: {
+    borderBottom: '1px solid #F1F5F9',
+    transition: 'background 0.2s'
+},
     tableCell: { padding: '12px 20px', color: '#444', fontSize: '14px', },
     actionButton: { padding: '8px 12px', borderRadius: '4px', border: 'none', color: '#FFFFFF', cursor: 'pointer', fontSize: '13px', fontWeight: '500', transition: 'background-color 0.2s ease', },
-    statusBadge: { padding: '4px 10px', borderRadius: '12px', color: '#FFFFFF', fontWeight: 'bold', fontSize: '11px', display: 'inline-block', minWidth: '60px', textAlign: 'center', textTransform: 'uppercase' },
-
+    statusBadge: { 
+    padding: '6px 14px', 
+    borderRadius: '12px', 
+    color: '#FFFFFF', 
+    fontWeight: 'bold', 
+    fontSize: '10px', 
+    display: 'inline-block', 
+    minWidth: '120px', 
+    textAlign: 'center', 
+    textTransform: 'uppercase',
+    whiteSpace: 'nowrap',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)' 
+},
     formCard: { backgroundColor: '#FFFFFF', borderRadius: '10px', padding: '30px', boxShadow: '0 2px 6px rgba(0,0,0,0.08)', marginBottom: '30px', },
     form: { display: 'flex', flexDirection: 'column', gap: '10px', },
     textInput: { width: '100%', padding: '12px 15px', borderRadius: '6px', border: '1px solid #DCE0E6', fontSize: '16px', color: '#333', outline: 'none', boxSizing: 'border-box', },
@@ -1056,6 +1851,55 @@ const styles = {
             outline: 'none',
             boxSizing: 'border-box'
         },
+
+
+        orderHeaderRow: {
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '25px',
+            backgroundColor: '#fff',
+            padding: '15px',
+            borderRadius: '12px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+        },
+
+
+        filterDropdown: {
+            padding: '10px 15px',
+            borderRadius: '8px',
+            border: '1px solid #DCE0E6',
+            fontSize: '14px',
+            fontWeight: '600',
+            color: '#334E68',
+            outline: 'none',
+            cursor: 'pointer',
+            minWidth: '200px'
+        },
+
+
+        exportBtnSmall: {
+            backgroundColor: '#1565C0',
+            color: '#fff',
+            border: 'none',
+            padding: '10px 20px',
+            borderRadius: '8px',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontSize: '14px'
+        },
+
+
+        noDataContainer: {
+            gridColumn: '1 / -1',
+            textAlign: 'center',
+            padding: '50px',
+            color: '#9FB3C8',
+            fontSize: '16px',
+            backgroundColor: '#fff',
+            borderRadius: '12px',
+            border: '2px dashed #E0E4E8'
+        },
         actions: {
             display: 'flex',
             justifyContent: 'flex-end',
@@ -1086,6 +1930,63 @@ const styles = {
         marginBottom: '8px',
         textAlign: 'left',
     },
+
+    filterHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: '15px 25px',
+    borderRadius: '12px',
+    marginBottom: '20px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+},
+filterDropdown: {
+    padding: '10px 15px',
+    borderRadius: '8px',
+    border: '1px solid #DCE0E6',
+    fontWeight: '600',
+    color: '#334E68',
+    cursor: 'pointer',
+    outline: 'none',
+    minWidth: '180px'
+},
+
+
+    
+
+    orderGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+    gap: '20px',
+    marginTop: '15px'
+},
+orderCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: '12px',
+    padding: '18px',
+    boxShadow: '0 4px 15px rgba(0,0,0,0.05)',
+    border: '1px solid #E0E4E8',
+    display: 'flex',
+    flexDirection: 'column',
+    transition: 'all 0.3s ease'
+},
+
+
+
+cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' },
+orderIdText: { fontSize: '16px', fontWeight: '800', color: '#102A43' },
+statusBadgeCard: { padding: '4px 10px', borderRadius: '15px', color: '#fff', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase' },
+cardBody: { display: 'flex', flexDirection: 'column', gap: '8px' },
+infoRow: { display: 'flex', justifyContent: 'space-between', fontSize: '13px' },
+infoLabel: { color: '#627D98', fontWeight: '500' },
+infoValue: { color: '#243B53', fontWeight: '600', textAlign: 'right' },
+cardDivider: { border: 'none', borderTop: '1px solid #F0F4F8', margin: '10px 0' },
+dateValueText: { color: '#102A43', fontWeight: '500', fontSize: '12px' },
+notDeliveredText: { color: '#D32F2F', fontSize: '11px', fontWeight: 'bold' },
+cardFooter: { marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed #BCCCDC', display: 'flex', justifyContent: 'flex-end' },
+bottleCountBadge: { background: '#F0F4F8', color: '#334E68', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px' },
+noDataSmall: { color: '#9FB3C8', fontStyle: 'italic', fontSize: '14px' }
 };
 
 export default ChannelAdminDashboard;

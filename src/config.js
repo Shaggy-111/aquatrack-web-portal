@@ -1,11 +1,5 @@
-// src/config.js
-const ENVIRONMENT = import.meta.env.MODE || 'development';
+const ENVIRONMENT = import.meta.env.MODE || "development";
 
-export const API_BASE_URL =
-  ENVIRONMENT === 'production'
-    ? 'https://aquatrack-backend.fly.dev'  // ✅ Production backend
-    : 'http://localhost:8000';              // ✅ Local backend
-
+export const API_BASE_URL = import.meta.env.VITE_API_URL;
+export const VITE_BLINKIT_REPORT_PIN = import.meta.env.VITE_BLINKIT_REPORT_PIN || "";
 export const APP_ENV = ENVIRONMENT;
-
-console.log(`🔧 Running in ${ENVIRONMENT} mode — API Base URL: ${API_BASE_URL}`);
