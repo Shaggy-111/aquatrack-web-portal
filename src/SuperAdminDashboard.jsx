@@ -21,12 +21,18 @@ import { INDIA_STATES, getCitiesForState } from "./constants/indiaLocations";
 import LogoutConfirmationDialog from "./components/LogoutConfirmationDialog";
 import MonthlyVirtualCards from "./pages/MonthlyVirtualCards";
 import BlinkitReports from "./pages/BlinkitReports";
+import ChannelAdminPermissionManager from "./components/ChannelAdminPermissionManager";
 
 const VENDOR_QR_URL = "https://veekayaquatech.com/vendor-info";
 
 // --- Configuration ---
 
 const BOTTLE_PRICE = 100; // Use BOTTLE_PRICE from this SuperAdmin file
+// Canonical Constants (Store Redesign Phase 1)
+const CANONICAL_REGIONS = ["NORTH", "SOUTH", "EAST", "WEST", "CENTRAL"];
+const CANONICAL_CHANNELS = ["BLINKIT", "ZEPTO", "IBM", "GENERAL", "CUSTOM"];
+const CANONICAL_ENTITIES = ["AMB", "BCPL", "BCPL-DS", "BFL", "BISTRO", "ZHPL", "ZEPTO"];
+
 // ⭐ FIX 1: Added 'CUSTOM' to the channel list
 const ALL_CHANNELS = ["BLINKIT", "ZEPTO", "IBM", "GENERAL", "CUSTOM"]; 
 const BLINKIT_ENTITIES = [
@@ -750,53 +756,495 @@ const ManagerTeamList = ({ manager, allDeliveryPartners, onReassignClick, styles
 };
 
 
-// --- Edit Store Modal Component ---
-const EditStoreModal = ({ isVisible, onClose, onSubmit, name, setName, address, setAddress, city, setCity, isLoading, styles }) => {
-    if (!isVisible) return null;
-    return (
-        <div style={styles.modalStyles.backdrop}>
-            <div style={{ ...styles.modalStyles.modal, width: '400px' }}>
-                <h3 style={styles.modalStyles.title}>✏️ Edit Store Information</h3>
-                <form onSubmit={onSubmit} style={styles.form}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                        <label style={styles.reportLabel}>Store Name:</label>
-                        <input
-                            style={styles.textInput}
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                        <label style={styles.reportLabel}>City:</label>
-                        <input
-                            style={styles.textInput}
-                            value={city}
-                            onChange={(e) => setCity(e.target.value)}
-                            required
-                        />
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                        <label style={styles.reportLabel}>Address:</label>
-                        <textarea
-                            style={{ ...styles.textInput, height: '80px', resize: 'vertical' }}
-                            value={address}
-                            onChange={(e) => setAddress(e.target.value)}
-                            rows={3}
-                        />
-                    </div>
-                    <div style={styles.modalStyles.actions}>
-                        <button type="button" onClick={onClose} style={styles.modalStyles.cancelButton} disabled={isLoading}>
-                            Cancel
-                        </button>
-                        <button type="submit" style={styles.modalStyles.submitButton} disabled={isLoading}>
-                            {isLoading ? 'Saving...' : 'Update Store'}
-                        </button>
-                    </div>
-                </form>
-            </div>
+// --- Bulk Store Upload Modal Component ---
+const BulkUploadModal = ({
+  isVisible,
+  onClose,
+  onDownloadTemplate,
+  isDownloadingTemplate,
+  file,
+  setFile,
+  password,
+  setPassword,
+  onSubmit,
+  isLoading,
+  errors,
+  result,
+  errorNotice,
+  styles,
+}) => {
+  if (!isVisible) return null;
+
+  const handleFileChange = (e) => {
+    const selected = e.target.files?.[0];
+    if (selected) {
+      if (selected.size > 10 * 1024 * 1024) {
+        alert("File size exceeds 10 MB limit.");
+        return;
+      }
+      setFile(selected);
+    }
+  };
+
+  return (
+    <div style={styles.modalStyles.backdrop}>
+      <div style={{ ...styles.modalStyles.modal, width: '680px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 style={{ ...styles.modalStyles.title, margin: 0 }}>Bulk Store Upload</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748B' }}
+          >
+            ✕
+          </button>
         </div>
-    );
+
+        {/* Template Download Banner */}
+        <div style={{
+          backgroundColor: '#F0FDF4',
+          border: '1px solid #BBF7D0',
+          borderRadius: '10px',
+          padding: '14px 16px',
+          marginBottom: '20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '12px',
+        }}>
+          <div>
+            <div style={{ fontWeight: '700', color: '#166534', fontSize: '14px' }}>Download Template</div>
+            <div style={{ color: '#15803D', fontSize: '12px', marginTop: '2px' }}>
+              Use the official Excel template for required columns and valid values.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onDownloadTemplate}
+            disabled={isDownloadingTemplate}
+            style={{
+              padding: '8px 14px',
+              backgroundColor: '#16A34A',
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: '700',
+              fontSize: '13px',
+              cursor: isDownloadingTemplate ? 'wait' : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {isDownloadingTemplate ? 'Downloading…' : '📥 Download .xlsx'}
+          </button>
+        </div>
+
+        {/* Success Alert */}
+        {result && (
+          <div style={{
+            backgroundColor: '#DCFCE7',
+            border: '1px solid #86EFAC',
+            borderRadius: '10px',
+            padding: '14px 16px',
+            marginBottom: '20px',
+            color: '#166534',
+          }}>
+            <div style={{ fontWeight: '800', fontSize: '15px' }}>✅ Upload Successful!</div>
+            <div style={{ fontSize: '13px', marginTop: '4px' }}>
+              Created <strong>{result.created_count ?? result.total_rows}</strong> store(s) out of <strong>{result.total_rows}</strong> total rows.
+              {result.skipped_count > 0 && ` (${result.skipped_count} skipped)`}
+            </div>
+          </div>
+        )}
+
+        {/* General Error Notice */}
+        {errorNotice && (
+          <div style={{
+            backgroundColor: '#FEE2E2',
+            border: '1px solid #FCA5A5',
+            borderRadius: '10px',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            color: '#991B1B',
+            fontSize: '13px',
+            fontWeight: '600',
+          }}>
+            {errorNotice}
+          </div>
+        )}
+
+        {/* Validation Errors Table (400 responses) */}
+        {errors && errors.length > 0 && (
+          <div style={{ marginBottom: '20px' }}>
+            <div style={{ fontWeight: '700', color: '#991B1B', fontSize: '13px', marginBottom: '8px' }}>
+              Row-level Validation Errors ({errors.length}):
+            </div>
+            <div style={{
+              maxHeight: '220px',
+              overflowY: 'auto',
+              border: '1px solid #FECACA',
+              borderRadius: '8px',
+              backgroundColor: '#FFF5F5',
+            }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#FEE2E2', color: '#991B1B', borderBottom: '1px solid #FECACA' }}>
+                    <th style={{ padding: '8px 12px' }}>Row</th>
+                    <th style={{ padding: '8px 12px' }}>Column</th>
+                    <th style={{ padding: '8px 12px' }}>Submitted Value</th>
+                    <th style={{ padding: '8px 12px' }}>Error</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {errors.map((err, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #FEE2E2' }}>
+                      <td style={{ padding: '6px 12px', fontWeight: '700' }}>{err.row ?? '—'}</td>
+                      <td style={{ padding: '6px 12px', fontWeight: '600', color: '#1E293B' }}>{err.column ?? '—'}</td>
+                      <td style={{ padding: '6px 12px', color: '#64748B', fontFamily: 'monospace' }}>
+                        {err.value !== undefined && err.value !== null ? String(err.value) : '—'}
+                      </td>
+                      <td style={{ padding: '6px 12px', color: '#DC2626' }}>{err.message || 'Invalid value'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Upload Form */}
+        <form onSubmit={onSubmit} style={styles.form}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+            <label style={{ ...styles.reportLabel, fontWeight: '700' }}>Select Excel File (.xlsx, max 10 MB):</label>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleFileChange}
+              style={{
+                ...styles.textInput,
+                padding: '10px',
+                border: '1px dashed #CBD5E1',
+                backgroundColor: '#F8FAFC',
+                cursor: 'pointer',
+              }}
+              required={!file}
+            />
+            {file && (
+              <div style={{ fontSize: '12px', color: '#0F766E', fontWeight: '600' }}>
+                Selected: {file.name} ({(file.size / 1024).toFixed(1)} KB)
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px' }}>
+            <label style={{ ...styles.reportLabel, fontWeight: '700' }}>
+              Admin Password Confirmation:
+            </label>
+            <input
+              type="password"
+              placeholder="Enter your admin password to authorize"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={styles.textInput}
+              required
+            />
+          </div>
+
+          <div style={styles.modalStyles.actions}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={styles.modalStyles.cancelButton}
+              disabled={isLoading}
+            >
+              Close
+            </button>
+            <button
+              type="submit"
+              style={{
+                ...styles.modalStyles.submitButton,
+                backgroundColor: '#2563EB',
+                cursor: isLoading ? 'wait' : 'pointer',
+              }}
+              disabled={isLoading || !file || !password}
+            >
+              {isLoading ? 'Uploading & Processing…' : 'Upload Stores'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// --- Edit Store Modal Component (Master Edit) ---
+const EditStoreModal = ({
+  isVisible,
+  onClose,
+  onSubmit,
+  store,
+  name, setName,
+  region, setRegion,
+  entity, setEntity,
+  channel, setChannel,
+  projectCode, setProjectCode,
+  state, setState,
+  city, setCity,
+  address, setAddress,
+  zipCode, setZipCode,
+  lat, setLat,
+  long, setLong,
+  assignedManagerId, setAssignedManagerId,
+  pocName, setPocName,
+  pocPhone, setPocPhone,
+  isActive, setIsActive,
+  deliveryManagers,
+  isLoading,
+  styles,
+}) => {
+  if (!isVisible || !store) return null;
+
+  return (
+    <div style={styles.modalStyles.backdrop}>
+      <div style={{ ...styles.modalStyles.modal, width: '700px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div>
+            <h3 style={{ ...styles.modalStyles.title, margin: 0 }}>Edit Store Information</h3>
+            <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748B' }}>
+              Update master store details. Store ID is permanently immutable.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748B' }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <form onSubmit={onSubmit} style={styles.form}>
+          {/* SECTION 1: IDENTITY */}
+          <div style={{ marginBottom: '16px' }}>
+            <div style={{ fontSize: '12px', fontWeight: '800', color: '#0F766E', textTransform: 'uppercase', marginBottom: '8px' }}>
+              Store Identity
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+              <div>
+                <label style={styles.reportLabel}>Store ID (Immutable):</label>
+                <input
+                  style={{ ...styles.textInput, backgroundColor: '#F1F5F9', color: '#64748B', cursor: 'not-allowed', fontWeight: '700' }}
+                  value={store.id}
+                  disabled
+                  readOnly
+                />
+              </div>
+              <div>
+                <label style={styles.reportLabel}>Store Name *:</label>
+                <input
+                  style={styles.textInput}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Store Name"
+                  required
+                />
+              </div>
+              <div>
+                <label style={styles.reportLabel}>Channel:</label>
+                <select
+                  style={styles.textInput}
+                  value={channel}
+                  onChange={(e) => setChannel(e.target.value)}
+                >
+                  {CANONICAL_CHANNELS.map((ch) => (
+                    <option key={ch} value={ch}>{ch}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={styles.reportLabel}>Region:</label>
+                <select
+                  style={styles.textInput}
+                  value={region}
+                  onChange={(e) => setRegion(e.target.value)}
+                >
+                  <option value="">Select Region</option>
+                  {CANONICAL_REGIONS.map((reg) => (
+                    <option key={reg} value={reg}>{reg}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={styles.reportLabel}>Entity:</label>
+                <select
+                  style={styles.textInput}
+                  value={entity}
+                  onChange={(e) => setEntity(e.target.value)}
+                >
+                  <option value="">Select Entity</option>
+                  {CANONICAL_ENTITIES.map((ent) => (
+                    <option key={ent} value={ent}>{ent}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={styles.reportLabel}>Project Code:</label>
+                <input
+                  style={styles.textInput}
+                  value={projectCode}
+                  onChange={(e) => setProjectCode(e.target.value)}
+                  placeholder="Project Code"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 2: LOCATION */}
+          <div style={{ marginBottom: '16px' }}>
+            <div style={{ fontSize: '12px', fontWeight: '800', color: '#0F766E', textTransform: 'uppercase', marginBottom: '8px' }}>
+              Location Details
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+              <div>
+                <label style={styles.reportLabel}>State:</label>
+                <select
+                  style={styles.textInput}
+                  value={state}
+                  onChange={(e) => setState(e.target.value)}
+                >
+                  <option value="">Select State</option>
+                  {INDIA_STATES.map((st) => (
+                    <option key={st} value={st}>{st}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={styles.reportLabel}>City *:</label>
+                <input
+                  style={styles.textInput}
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="City"
+                  required
+                />
+              </div>
+              <div style={{ gridColumn: 'span 2' }}>
+                <label style={styles.reportLabel}>Address:</label>
+                <textarea
+                  style={{ ...styles.textInput, height: '60px', resize: 'vertical' }}
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="Full Address"
+                  rows={2}
+                />
+              </div>
+              <div>
+                <label style={styles.reportLabel}>PIN / Zip Code:</label>
+                <input
+                  style={styles.textInput}
+                  value={zipCode}
+                  onChange={(e) => setZipCode(e.target.value)}
+                  placeholder="Zip Code"
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div>
+                  <label style={styles.reportLabel}>Latitude:</label>
+                  <input
+                    style={styles.textInput}
+                    type="number"
+                    step="any"
+                    value={lat}
+                    onChange={(e) => setLat(e.target.value)}
+                    placeholder="Lat"
+                  />
+                </div>
+                <div>
+                  <label style={styles.reportLabel}>Longitude:</label>
+                  <input
+                    style={styles.textInput}
+                    type="number"
+                    step="any"
+                    value={long}
+                    onChange={(e) => setLong(e.target.value)}
+                    placeholder="Long"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 3: ASSIGNMENT & POC */}
+          <div style={{ marginBottom: '16px' }}>
+            <div style={{ fontSize: '12px', fontWeight: '800', color: '#0F766E', textTransform: 'uppercase', marginBottom: '8px' }}>
+              Vendor & Point of Contact
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+              <div style={{ gridColumn: 'span 2' }}>
+                <label style={styles.reportLabel}>Vendor (Delivery Manager):</label>
+                <select
+                  style={styles.textInput}
+                  value={assignedManagerId}
+                  onChange={(e) => setAssignedManagerId(e.target.value)}
+                >
+                  <option value="">-- No Vendor Assigned --</option>
+                  {(deliveryManagers || []).map((dm) => (
+                    <option key={dm.id} value={dm.id}>
+                      {dm.full_name || dm.name || dm.email} (ID: {dm.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={styles.reportLabel}>POC Name:</label>
+                <input
+                  style={styles.textInput}
+                  value={pocName}
+                  onChange={(e) => setPocName(e.target.value)}
+                  placeholder="POC Name"
+                />
+              </div>
+              <div>
+                <label style={styles.reportLabel}>POC Phone:</label>
+                <input
+                  style={styles.textInput}
+                  value={pocPhone}
+                  onChange={(e) => setPocPhone(e.target.value)}
+                  placeholder="POC Phone"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 4: STATUS */}
+          <div style={{ marginBottom: '20px' }}>
+            <div style={{ fontSize: '12px', fontWeight: '800', color: '#0F766E', textTransform: 'uppercase', marginBottom: '8px' }}>
+              Operational Status
+            </div>
+            <div>
+              <label style={styles.reportLabel}>Status:</label>
+              <select
+                style={styles.textInput}
+                value={isActive ? "true" : "false"}
+                onChange={(e) => setIsActive(e.target.value === "true")}
+              >
+                <option value="true">Active</option>
+                <option value="false">Inactive</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={styles.modalStyles.actions}>
+            <button type="button" onClick={onClose} style={styles.modalStyles.cancelButton} disabled={isLoading}>
+              Cancel
+            </button>
+            <button type="submit" style={styles.modalStyles.submitButton} disabled={isLoading}>
+              {isLoading ? 'Saving Changes…' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 };
 const EditManagerModal = ({ isVisible, onClose, onSubmit, manager, email, setEmail, password, setPassword, isLoading, styles }) => {
     if (!isVisible || !manager) return null;
@@ -985,6 +1433,16 @@ const [selectedDPId, setSelectedDPId] = useState("");
   const [storeStatusUpdatingId, setStoreStatusUpdatingId] = useState(null);
   const [pendingStoreStatusChange, setPendingStoreStatusChange] = useState(null);
   const [storeStatusNotice, setStoreStatusNotice] = useState(null);
+
+  // --- Bulk Store Upload States ---
+  const [isBulkUploadModalOpen, setIsBulkUploadModalOpen] = useState(false);
+  const [bulkUploadFile, setBulkUploadFile] = useState(null);
+  const [bulkUploadPassword, setBulkUploadPassword] = useState("");
+  const [bulkUploadLoading, setBulkUploadLoading] = useState(false);
+  const [bulkUploadErrors, setBulkUploadErrors] = useState(null);
+  const [bulkUploadResult, setBulkUploadResult] = useState(null);
+  const [bulkUploadErrorNotice, setBulkUploadErrorNotice] = useState(null);
+  const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
   const [storeQrById, setStoreQrById] = useState({});
   const [storeQrLoadingIds, setStoreQrLoadingIds] = useState({});
   const [storeQrModal, setStoreQrModal] = useState(null);
@@ -1039,11 +1497,25 @@ const [channelAdminName, setChannelAdminName] = useState("");
 const [channelAdminEmail, setChannelAdminEmail] = useState("");
 const [channelAdminPassword, setChannelAdminPassword] = useState("");
 const [channelAdminChannel, setChannelAdminChannel] = useState("BLINKIT");
+const [channelAdminForPermissions, setChannelAdminForPermissions] = useState(null);
 const [isEditStoreModalVisible, setIsEditStoreModalVisible] = useState(false);
 const [editingStore, setEditingStore] = useState(null);
 const [editStoreName, setEditStoreName] = useState("");
-const [editStoreAddress, setEditStoreAddress] = useState("");
+const [editStoreRegion, setEditStoreRegion] = useState("");
+const [editStoreEntity, setEditStoreEntity] = useState("");
+const [editStoreChannel, setEditStoreChannel] = useState("GENERAL");
+const [editStoreProjectCode, setEditStoreProjectCode] = useState("");
+const [editStoreState, setEditStoreState] = useState("");
 const [editStoreCity, setEditStoreCity] = useState("");
+const [editStoreAddress, setEditStoreAddress] = useState("");
+const [editStoreZipCode, setEditStoreZipCode] = useState("");
+const [editStoreLat, setEditStoreLat] = useState("");
+const [editStoreLong, setEditStoreLong] = useState("");
+const [editStoreAssignedManagerId, setEditStoreAssignedManagerId] = useState("");
+const [editStorePocName, setEditStorePocName] = useState("");
+const [editStorePocPhone, setEditStorePocPhone] = useState("");
+const [editStoreIsActive, setEditStoreIsActive] = useState(true);
+const [editStoreLoading, setEditStoreLoading] = useState(false);
 
 
 const [isSupplierDeliveryModalVisible, setIsSupplierDeliveryModalVisible] = useState(false);
@@ -3385,26 +3857,172 @@ const updateStoreQrStatus = async (store) => {
   }
 };
 
-// ✅ Store Info (Name/Address) edit karne ke liye
-const handleEditStoreSubmit = async (e) => {
-    e.preventDefault();
-    try {
-        setLoading(true);
-        const token = localStorage.getItem("auth_token") || accessToken;
-        await axios.patch(`${API_BASE_URL}/store/store/update/${editingStore.id}`, {
-            store_name: editStoreName,
-            address: editStoreAddress,
-            city: editStoreCity
-        }, { headers: { Authorization: `Bearer ${token}` } });
+// --- BULK STORE UPLOAD & TEMPLATE DOWNLOAD ---
+const handleDownloadTemplate = async () => {
+  try {
+    setIsDownloadingTemplate(true);
+    const token = localStorage.getItem("auth_token") || accessToken;
+    const response = await axios.get(`${API_BASE_URL}/store/bulk-upload/template`, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: "blob",
+    });
 
-        alert("✅ Store updated successfully!");
-        setIsEditStoreModalVisible(false);
-        await fetchAllData();
-    } catch (err) {
-        alert(err.response?.data?.detail || "Update failed");
-    } finally {
-        setLoading(false);
+    let filename = "store_bulk_upload_template.xlsx";
+    const disposition = response.headers?.["content-disposition"] || response.headers?.["Content-Disposition"];
+    if (disposition && disposition.indexOf("filename=") !== -1) {
+      const filenameMatch = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+      if (filenameMatch && filenameMatch[1]) {
+        filename = filenameMatch[1].replace(/['"]/g, "").trim();
+      }
     }
+
+    const blob = new Blob([response.data], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  } catch (err) {
+    console.error("Template download error:", err);
+    alert(err.response?.data?.detail || "Failed to download bulk upload template. Please try again.");
+  } finally {
+    setIsDownloadingTemplate(false);
+  }
+};
+
+const handleBulkUploadSubmit = async (e) => {
+  if (e) e.preventDefault();
+  if (!bulkUploadFile) {
+    setBulkUploadErrorNotice("Please select an Excel (.xlsx) file to upload.");
+    return;
+  }
+  if (!bulkUploadPassword) {
+    setBulkUploadErrorNotice("Admin password is required to confirm bulk upload.");
+    return;
+  }
+  if (bulkUploadFile.size > 10 * 1024 * 1024) {
+    setBulkUploadErrorNotice("File size exceeds 10 MB limit.");
+    return;
+  }
+
+  setBulkUploadLoading(true);
+  setBulkUploadErrors(null);
+  setBulkUploadResult(null);
+  setBulkUploadErrorNotice(null);
+
+  try {
+    const token = localStorage.getItem("auth_token") || accessToken;
+    const formData = new FormData();
+    formData.append("file", bulkUploadFile);
+    formData.append("password", bulkUploadPassword);
+
+    const response = await axios.post(`${API_BASE_URL}/store/bulk-upload`, formData, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "multipart/form-data",
+      },
+    });
+
+    if (response.status === 200 || response.status === 201) {
+      setBulkUploadResult(response.data);
+      setBulkUploadPassword("");
+      setBulkUploadFile(null);
+      await fetchAllData();
+    }
+  } catch (err) {
+    console.error("Bulk upload error:", err);
+    const status = err.response?.status;
+    const data = err.response?.data;
+
+    if (status === 400 && data?.errors && Array.isArray(data.errors)) {
+      setBulkUploadErrors(data.errors);
+      setBulkUploadErrorNotice(
+        `Validation failed: ${data.invalid_rows ?? data.errors.length} invalid row(s) out of ${data.total_rows ?? "?"} total rows.`
+      );
+    } else {
+      const msg = data?.detail || data?.message || err.message || "Bulk upload failed. Please verify the file and try again.";
+      setBulkUploadErrorNotice(typeof msg === "string" ? msg : JSON.stringify(msg));
+    }
+  } finally {
+    setBulkUploadLoading(false);
+  }
+};
+
+const handleCloseBulkUploadModal = () => {
+  setIsBulkUploadModalOpen(false);
+  setBulkUploadFile(null);
+  setBulkUploadPassword("");
+  setBulkUploadErrors(null);
+  setBulkUploadResult(null);
+  setBulkUploadErrorNotice(null);
+};
+
+// --- STORE MASTER EDIT HANDLERS ---
+const handleOpenEditStore = (store) => {
+  setEditingStore(store);
+  setEditStoreName(store.store_name || "");
+  setEditStoreRegion(store.region ? String(store.region).trim().toUpperCase() : "");
+  setEditStoreEntity(store.entity ? String(store.entity).trim() : "");
+  setEditStoreChannel(store.channel ? String(store.channel).trim().toUpperCase() : "GENERAL");
+  setEditStoreProjectCode(store.project_code || "");
+  setEditStoreState(store.state || "");
+  setEditStoreCity(store.city || "");
+  setEditStoreAddress(store.address || "");
+  setEditStoreZipCode(store.zip_code || store.pincode || "");
+  setEditStoreLat(store.latitude != null ? String(store.latitude) : "");
+  setEditStoreLong(store.longitude != null ? String(store.longitude) : "");
+  setEditStoreAssignedManagerId(store.assigned_manager_id ?? store.delivery_manager_id ?? "");
+  setEditStorePocName(store.poc_name || store.poc || "");
+  setEditStorePocPhone(store.poc_phone || "");
+  setEditStoreIsActive(isStoreActive(store));
+  setIsEditStoreModalVisible(true);
+};
+
+const handleEditStoreSubmit = async (e) => {
+  e.preventDefault();
+  if (!editingStore) return;
+  try {
+    setEditStoreLoading(true);
+    const token = localStorage.getItem("auth_token") || accessToken;
+
+    const payload = {
+      store_name: String(editStoreName || "").trim(),
+      region: editStoreRegion ? String(editStoreRegion).trim().toUpperCase() : null,
+      entity: editStoreEntity ? String(editStoreEntity).trim() : null,
+      channel: editStoreChannel ? String(editStoreChannel).trim().toUpperCase() : null,
+      project_code: editStoreProjectCode ? String(editStoreProjectCode).trim() : null,
+      state: editStoreState ? String(editStoreState).trim() : null,
+      city: String(editStoreCity || "").trim(),
+      address: editStoreAddress ? String(editStoreAddress).trim() : null,
+      zip_code: editStoreZipCode ? String(editStoreZipCode).trim() : null,
+      latitude: editStoreLat !== "" && !isNaN(Number(editStoreLat)) ? Number(editStoreLat) : null,
+      longitude: editStoreLong !== "" && !isNaN(Number(editStoreLong)) ? Number(editStoreLong) : null,
+      assigned_manager_id: editStoreAssignedManagerId ? Number(editStoreAssignedManagerId) : null,
+      poc_name: editStorePocName ? String(editStorePocName).trim() : null,
+      poc_phone: editStorePocPhone ? String(editStorePocPhone).trim() : null,
+      is_active: Boolean(editStoreIsActive),
+    };
+
+    // Store ID is permanently immutable after creation. Never include id in PATCH body.
+    await axios.patch(`${API_BASE_URL}/store/update/${editingStore.id}`, payload, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    alert("Store updated successfully!");
+    setIsEditStoreModalVisible(false);
+    setEditingStore(null);
+    await fetchAllData();
+  } catch (err) {
+    console.error("Store update failed:", err);
+    alert(err.response?.data?.detail || err.message || "Store update failed.");
+  } finally {
+    setEditStoreLoading(false);
+  }
 };
 
 // ------------------------------------------
@@ -3916,68 +4534,114 @@ const handleApprovePartner = async (partnerId) => {
 
 
   const StoreDetailsModal = ({ isVisible, onClose, store, partners, modalStyles, statusLoading, onStatusToggle, canUpdateStatus }) => {
-  if (!isVisible || !store) return null;
+    if (!isVisible || !store) return null;
 
-  // Find assigned partners
-  const assignedPartners = partners.filter(p =>
-    p.stores.some(s => s.id === store.id)
-  );
-  const partnerNames = assignedPartners.map(p => p.full_name).join(', ') || 'N/A';
+    // Find assigned partners (fallback for POC)
+    const assignedPartners = (partners || []).filter(p =>
+      p.stores && p.stores.some(s => s.id === store.id)
+    );
+    const partnerNames = assignedPartners.map(p => p.full_name).join(', ');
+    const displayPoc = store.poc_name || store.poc || partnerNames || 'Not Assigned';
+    const displayVendor = store.assigned_manager || store.delivery_manager || 'Not Assigned';
 
-  return (
-    <div style={modalStyles.backdrop}>
-      <div style={{ ...modalStyles.modal, width: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
-        <h3 style={modalStyles.title}>Store Details</h3>
-        <div style={styles.detailsGrid}>
-          <div style={styles.detailsColumn}>
+    return (
+      <div style={modalStyles.backdrop}>
+        <div style={{ ...modalStyles.modal, width: '650px', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h3 style={{ ...modalStyles.title, margin: 0 }}>Store Details</h3>
+              <span style={{
+                padding: '3px 8px',
+                borderRadius: '6px',
+                backgroundColor: '#F1F5F9',
+                color: '#475569',
+                fontSize: '12px',
+                fontWeight: '700',
+              }}>
+                ID: {store.id}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748B' }}
+            >
+              ✕
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px', marginBottom: '20px' }}>
             <div style={styles.detailItem}>
               <p style={styles.detailLabel}>Store Name:</p>
-              <p style={styles.detailValue}>{store.store_name}</p>
-            </div>
-            <div style={styles.detailItem}>
-              <p style={styles.detailLabel}>City:</p>
-              <p style={styles.detailValue}>{store.city}</p>
-            </div>
-            <div style={styles.detailItem}>
-              <p style={styles.detailLabel}>Address:</p>
-              <p style={styles.detailValue}>{store.address || 'N/A'}</p>
-            </div>
-            <div style={styles.detailItem}>
-              <p style={styles.detailLabel}>Latitude:</p>
-              <p style={styles.detailValue}>{store.latitude || 'N/A'}</p>
-            </div>
-            <div style={styles.detailItem}>
-              <p style={styles.detailLabel}>Longitude:</p>
-              <p style={styles.detailValue}>{store.longitude || 'N/A'}</p>
+              <p style={{ ...styles.detailValue, fontWeight: '700', color: '#1E293B' }}>{store.store_name}</p>
             </div>
             <div style={styles.detailItem}>
               <p style={styles.detailLabel}>Channel:</p>
-              <p style={styles.detailValue}>{store.channel || 'N/A'}</p>
+              <p style={{ ...styles.detailValue, fontWeight: '700', color: '#2563EB' }}>{store.channel || 'GENERAL'}</p>
             </div>
             <div style={styles.detailItem}>
-              <p style={styles.detailLabel}>Partner(s):</p>
-              <p style={styles.detailValue}>{partnerNames}</p>
+              <p style={styles.detailLabel}>Region:</p>
+              <p style={styles.detailValue}>{store.region || '—'}</p>
             </div>
             <div style={styles.detailItem}>
-              <p style={styles.detailLabel}>Status:</p>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "4px" }}>
+              <p style={styles.detailLabel}>Entity:</p>
+              <p style={styles.detailValue}>{store.entity || '—'}</p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>Project Code:</p>
+              <p style={styles.detailValue}>{store.project_code || '—'}</p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>State & City:</p>
+              <p style={styles.detailValue}>{[store.city, store.state].filter(Boolean).join(', ') || '—'}</p>
+            </div>
+            <div style={{ ...styles.detailItem, gridColumn: 'span 2' }}>
+              <p style={styles.detailLabel}>Address:</p>
+              <p style={styles.detailValue}>{store.address || '—'}</p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>PIN / Zip Code:</p>
+              <p style={styles.detailValue}>{store.zip_code || store.pincode || '—'}</p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>Coordinates (Lat / Long):</p>
+              <p style={styles.detailValue}>
+                {store.latitude != null && store.longitude != null ? `${store.latitude}, ${store.longitude}` : '—'}
+              </p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>Vendor (Delivery Manager):</p>
+              <p style={{ ...styles.detailValue, fontWeight: '600' }}>
+                {displayVendor}
+                {store.assigned_manager_id ? ` (ID: ${store.assigned_manager_id})` : ''}
+              </p>
+            </div>
+            <div style={styles.detailItem}>
+              <p style={styles.detailLabel}>Point of Contact (POC):</p>
+              <p style={{ ...styles.detailValue, fontWeight: '600' }}>
+                {displayPoc}
+                {store.poc_phone ? ` • ${store.poc_phone}` : ''}
+              </p>
+            </div>
+            <div style={{ ...styles.detailItem, gridColumn: 'span 2' }}>
+              <p style={styles.detailLabel}>Operational Status:</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px' }}>
                 <StoreStatusBadge store={store} />
                 {canUpdateStatus && (
                   <StoreStatusToggle store={store} loading={statusLoading} onToggle={onStatusToggle} />
                 )}
-                {canUpdateStatus && statusLoading && <span style={{ color: "#64748B", fontSize: "12px" }}>Updating…</span>}
+                {canUpdateStatus && statusLoading && <span style={{ color: '#64748B', fontSize: '12px' }}>Updating…</span>}
               </div>
             </div>
           </div>
-        </div>
 
-        <div style={modalStyles.actions}>
-          <button onClick={onClose} style={modalStyles.cancelButton}>Close</button>
+          <div style={modalStyles.actions}>
+            <button onClick={onClose} style={modalStyles.cancelButton}>Close</button>
+          </div>
         </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
 
 
 
@@ -7328,6 +7992,7 @@ const renderActiveStoresList = () => {
     const active = isStoreActive(store);
     if (storeStatusFilter === "ACTIVE" && !active) return false;
     if (storeStatusFilter === "INACTIVE" && active) return false;
+    if (storeFilterChannel !== "ALL" && storeFilterChannel && String(store.channel || "GENERAL").toUpperCase() !== storeFilterChannel.toUpperCase()) return false;
     if (!normalizedStoreSearch) return true;
     return [
       store.id,
@@ -7337,12 +8002,13 @@ const renderActiveStoresList = () => {
       store.address,
       store.channel,
       store.assigned_manager,
+      store.poc_name,
     ].some((value) => String(value || "").toLowerCase().includes(normalizedStoreSearch));
   });
 
   // Group stores by channel
   const storesByChannel = filteredStoreManagementList.reduce((acc, store) => {
-    const channel = store.channel ? store.channel.toUpperCase() : "UNASSIGNED";
+    const channel = store.channel ? store.channel.toUpperCase() : "GENERAL";
     if (!acc[channel]) acc[channel] = [];
     acc[channel].push(store);
     return acc;
@@ -7350,118 +8016,65 @@ const renderActiveStoresList = () => {
 
   const channels = Object.keys(storesByChannel).sort();
 
-  // Partner → Store mapping logic
+  // Partner → Store mapping logic (used as fallback for POC)
   const partnerStoreMap = partners.reduce((map, partner) => {
-    partner.stores.forEach((store) => {
+    (partner.stores || []).forEach((store) => {
       if (!map[store.id]) map[store.id] = [];
       map[store.id].push(partner.full_name);
     });
     return map;
   }, {});
 
-  const getStoreAssignmentStatus = (store) => {
-    const managerId = store.delivery_manager_id ?? store.assigned_manager_id ?? store.manager_id;
-    const managerName = store.delivery_manager_name ?? store.delivery_manager ?? store.assigned_manager ?? store.manager_name;
-    const mappedPocs = partnerStoreMap[store.id] || [];
-    const directPoc = store.poc ?? store.poc_name;
-
-    const hasManagerId = managerId !== null && managerId !== undefined && managerId !== 0 && managerId !== "0" && managerId !== "";
-    const hasManagerName = typeof managerName === "string" && managerName.trim() !== "";
-    const hasDirectPoc = typeof directPoc === "string" && directPoc.trim() !== "";
-
-    return {
-      missingManager: !hasManagerId || !hasManagerName,
-      missingPoc: mappedPocs.length === 0 && !hasDirectPoc,
-      managerName: hasManagerName ? managerName.trim() : "Not Assigned",
-      pocName: mappedPocs.length > 0 ? mappedPocs.join(", ") : (hasDirectPoc ? directPoc.trim() : "Not Assigned"),
-    };
-  };
-
-  const storesRequiringAssignment = allStores.filter((store) => {
-    const { missingManager, missingPoc } = getStoreAssignmentStatus(store);
-    return missingManager || missingPoc;
-  });
-
-  const handleExportStoresRequiringAssignment = () => {
-    const exportRows = storesRequiringAssignment.map((store) => {
-      const assignment = getStoreAssignmentStatus(store);
-      const status = assignment.missingManager && assignment.missingPoc
-        ? "Missing Manager & Missing POC"
-        : assignment.missingManager
-          ? "Missing Manager"
-          : "Missing POC";
-
-      return {
-        "Store ID": store.id,
-        "Store Name": store.store_name || "",
-        "Channel": store.channel || "",
-        "Region": store.region || "",
-        "Entity": store.entity || "",
-        "State": store.state || "",
-        "City": store.city || "",
-        "Address": store.address || "",
-        "Delivery Manager": assignment.missingManager ? "Not Assigned" : assignment.managerName,
-        "POC": assignment.missingPoc ? "Not Assigned" : assignment.pocName,
-        "Status": status,
-      };
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(exportRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Stores Requiring Assignment");
-
-    const today = new Date();
-    const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-    XLSX.writeFile(workbook, `Stores_Requiring_Assignment_${date}.xlsx`);
-  };
-
-  // Grid styles
+  // Clean Store Card Grid styles
   const stylesGrid = {
     gridContainer: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+      gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
       gap: "20px",
       width: "100%",
       marginTop: "16px",
     },
     storeCard: {
-      border: "1px solid #e1e1e1",
+      border: "1px solid #E2E8F0",
       padding: "20px",
       borderRadius: "12px",
       background: "#fff",
       display: "flex",
       flexDirection: "column",
-      boxShadow: "0 4px 6px rgba(0,0,0,0.05)",
+      justifyContent: "space-between",
+      boxShadow: "0 2px 4px rgba(0,0,0,0.04)",
+      transition: "box-shadow 0.2s ease",
     },
     storeTitle: {
-      fontSize: "17px",
+      fontSize: "16px",
       fontWeight: "700",
-      marginBottom: "6px",
-      color: "#1e293b",
+      color: "#1E293B",
+      lineHeight: 1.3,
     },
     storeSub: {
-      margin: "2px 0",
-      color: "#64748b",
+      margin: "4px 0",
+      color: "#64748B",
       fontSize: "13px",
+      lineHeight: 1.4,
     },
-    storeChannel: {
-      fontSize: "12px",
+    channelBadge: {
+      fontSize: "11px",
       fontWeight: "800",
-      color: "#0052CC",
-      marginTop: "8px",
+      color: "#2563EB",
+      backgroundColor: "#EFF6FF",
+      padding: "3px 8px",
+      borderRadius: "6px",
+      display: "inline-block",
+      marginTop: "6px",
       textTransform: "uppercase",
-    },
-    automationPanel: {
-      marginTop: "15px",
-      padding: "15px",
-      background: "#f8fafc",
-      borderRadius: "10px",
-      border: "1px solid #e2e8f0",
+      letterSpacing: "0.5px",
     },
     actionRow: {
-      marginTop: "15px",
+      marginTop: "16px",
+      paddingTop: "12px",
+      borderTop: "1px solid #F1F5F9",
       display: "flex",
-      gap: "10px",
+      gap: "8px",
     },
     actionBtn: {
       flex: 1,
@@ -7469,7 +8082,7 @@ const renderActiveStoresList = () => {
       borderRadius: "8px",
       border: "none",
       cursor: "pointer",
-      fontSize: "13px",
+      fontSize: "12px",
       fontWeight: "600",
       color: "#fff",
       display: "flex",
@@ -7488,185 +8101,91 @@ const renderActiveStoresList = () => {
     >
       <div style={stylesGrid.gridContainer}>
         {stores.map((store) => {
-          // Check for partner list directly from mapping
           const mappedPartners = partnerStoreMap[store.id] || [];
-          const partnerNames = mappedPartners.length > 0 ? mappedPartners.join(", ") : "N/A";
-          const storeQr = storeQrById[String(store.id)];
-          const storeQrLoading = Boolean(storeQrLoadingIds[String(store.id)]);
-          
-          // 🔥 1. RE-DEFINED VALIDATION:
-          // Agar database column available nahi hai, toh hum check karenge 
-          // ki kya store object ke andar assigned_manager exist karta hai.
-          const hasManager = store.assigned_manager_id || store.assigned_manager || store.manager_id;
-          const hasPartner = mappedPartners.length > 0;
-          
-          const canEnableAutomation = hasManager && hasPartner;
+          const partnerNames = mappedPartners.length > 0 ? mappedPartners.join(", ") : "Not Assigned";
+          const displayPoc = store.poc_name || store.poc || partnerNames;
+          const displayVendor = store.assigned_manager || store.delivery_manager || "Not Assigned";
+          const isActive = isStoreActive(store);
 
           return (
             <div
               key={store.id}
               style={{
                 ...stylesGrid.storeCard,
-                ...(isStoreActive(store) ? {} : { background: "#F8FAFC", opacity: 0.72 }),
+                ...(isActive ? {} : { background: "#F8FAFC", opacity: 0.8 }),
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
-                <div style={stylesGrid.storeTitle}>{store.store_name}</div>
-                <StoreStatusBadge store={store} />
-              </div>
-              <div style={stylesGrid.storeSub}><strong>Store ID:</strong> {store.id}</div>
-              <div style={stylesGrid.storeSub}>
-                📍 {store.city}
-              </div>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px", marginBottom: "8px" }}>
+                  <div>
+                    <div style={stylesGrid.storeTitle}>{store.store_name}</div>
+                    <span style={stylesGrid.channelBadge}>{store.channel || "GENERAL"}</span>
+                  </div>
+                  <StoreStatusBadge store={store} />
+                </div>
 
-              <div style={stylesGrid.storeSub}>
-                👨‍💼 Delivery Manager:{" "}
-                <strong>
-                  {store.assigned_manager || "Not Assigned"}
-                </strong>
-              </div>
+                <div style={stylesGrid.storeSub}>
+                  <strong>Store ID:</strong> <span style={{ fontFamily: "monospace", color: "#334155" }}>{store.id}</span>
+                </div>
 
-              <div style={stylesGrid.storeSub}>
-                🆔 Manager ID:{" "}
-                {store.assigned_manager_id || "N/A"}
-              </div>
+                {(store.region || store.entity) && (
+                  <div style={stylesGrid.storeSub}>
+                    {store.region && <span><strong>Region:</strong> {store.region} </span>}
+                    {store.entity && <span><strong>Entity:</strong> {store.entity}</span>}
+                  </div>
+                )}
 
-              <div style={stylesGrid.storeSub}>
-                👤 POC: {partnerNames}
-              </div>
-              <div style={stylesGrid.storeChannel}>{store.channel || "GENERAL"}</div>
-              {isSuperAdminRole && (
-                <div style={stylesGrid.automationPanel}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
-                    <span style={{ color: "#334155", fontSize: "13px", fontWeight: "800" }}>QR Status</span>
-                    <span style={{
-                      padding: "4px 9px",
-                      borderRadius: "999px",
-                      backgroundColor: storeQr?.qr_enabled ? "#DCFCE7" : "#F1F5F9",
-                      color: storeQr?.qr_enabled ? "#166534" : "#475569",
-                      fontSize: "11px",
-                      fontWeight: "800",
-                    }}>
-                      {storeQrLoading ? "Loading…" : storeQr?.qr_enabled ? "Active" : "Disabled"}
+                <div style={stylesGrid.storeSub}>
+                  <strong>Location:</strong> {[store.city, store.state].filter(Boolean).join(", ") || "N/A"}
+                </div>
+
+                {store.address && (
+                  <div style={{ ...stylesGrid.storeSub, fontSize: "12px" }}>
+                    <strong>Address:</strong> {store.address}
+                  </div>
+                )}
+
+                <div style={{ marginTop: "10px", paddingTop: "8px", borderTop: "1px dashed #E2E8F0" }}>
+                  <div style={stylesGrid.storeSub}>
+                    <strong>Vendor:</strong>{" "}
+                    <span style={{ color: displayVendor !== "Not Assigned" ? "#0F766E" : "#94A3B8", fontWeight: "600" }}>
+                      {displayVendor}
                     </span>
+                    {store.assigned_manager_id ? <span style={{ color: "#94A3B8", fontSize: "11px" }}> (ID: {store.assigned_manager_id})</span> : null}
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px", marginTop: "12px" }}>
-                    <button
-                      type="button"
-                      style={{ ...stylesGrid.actionBtn, backgroundColor: "#0F766E" }}
-                      disabled={storeQrLoading}
-                      onClick={() => openStoreQrModal(store)}
-                    >
-                      View QR
-                    </button>
-                    <button
-                      type="button"
-                      style={{ ...stylesGrid.actionBtn, backgroundColor: "#2563EB" }}
-                      disabled={storeQrLoading}
-                      onClick={() => downloadStoreQr(store)}
-                    >
-                      Download QR
-                    </button>
-                    <button
-                      type="button"
-                      style={{ ...stylesGrid.actionBtn, backgroundColor: "#D97706" }}
-                      disabled={storeQrLoading}
-                      onClick={() => setPendingStoreQrRotation(store)}
-                    >
-                      Rotate QR
-                    </button>
-                    <button
-                      type="button"
-                      style={{ ...stylesGrid.actionBtn, backgroundColor: storeQr?.qr_enabled ? "#64748B" : "#16A34A" }}
-                      disabled={storeQrLoading || !storeQr}
-                      onClick={() => updateStoreQrStatus(store)}
-                    >
-                      {storeQr?.qr_enabled ? "Disable QR" : "Enable QR"}
-                    </button>
-                  </div>
-                </div>
-              )}
-              {canUpdateStoreStatus && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
-                <span style={{ color: "#475569", fontSize: "13px", fontWeight: "700" }}>
-                  {isStoreActive(store) ? "Active" : "Inactive"}
-                </span>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  {String(storeStatusUpdatingId) === String(store.id) && (
-                    <span style={{ color: "#64748B", fontSize: "12px" }}>Updating…</span>
-                  )}
-                  <StoreStatusToggle
-                    store={store}
-                    loading={String(storeStatusUpdatingId) === String(store.id)}
-                    onToggle={requestStoreStatusChange}
-                  />
-                </div>
-              </div>}
 
-              {/* --- ⚙️ AUTOMATION & CAPPING CONTROL --- */}
-              <div style={stylesGrid.automationPanel}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: '700', color: '#334155' }}>🤖 Automation</span>
-                  
-                  {/* Toggle Switch */}
-                  <div 
-                    onClick={() => {
-                      if (!canEnableAutomation) {
-                        alert(`🚨 Setup Required: \nManager: ${hasManager ? '✅' : '❌'}\nPartner: ${hasPartner ? '✅' : '❌'}\n\nPlease complete registration first.`);
-                        return;
-                      }
-                      handleUpdateStoreAutomation(store.id, { auto_order_enabled: !store.auto_order_enabled });
-                    }}
-                    style={{
-                      width: '44px', height: '22px', borderRadius: '11px', cursor: 'pointer', position: 'relative',
-                      backgroundColor: store.auto_order_enabled && canEnableAutomation ? '#10B981' : '#CBD5E1', transition: '0.3s'
-                    }}
-                  >
-                    <div style={{
-                      width: '18px', height: '18px', borderRadius: '50%', background: '#fff', position: 'absolute', top: '2px',
-                      left: store.auto_order_enabled && canEnableAutomation ? '24px' : '2px', transition: '0.3s', boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                    }} />
+                  <div style={stylesGrid.storeSub}>
+                    <strong>POC:</strong>{" "}
+                    <span style={{ color: displayPoc !== "Not Assigned" ? "#1E293B" : "#94A3B8", fontWeight: "600" }}>
+                      {displayPoc}
+                    </span>
+                    {store.poc_phone ? <span style={{ color: "#64748B", fontSize: "11px" }}> • {store.poc_phone}</span> : null}
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ fontSize: '10px', color: '#64748B', fontWeight: '700' }}>FREQ (DAYS)</label>
-                    <input 
-                      type="number" 
-                      defaultValue={store.order_frequency_days || 1} 
-                      style={{ ...styles.textInput, width: '100%', padding: '5px', fontSize: '12px', marginTop: '4px' }}
-                      onBlur={(e) => handleUpdateStoreAutomation(store.id, { order_frequency_days: parseInt(e.target.value) || 1 })} 
-                    />
+                {canUpdateStoreStatus && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px" }}>
+                    <span style={{ color: "#475569", fontSize: "12px", fontWeight: "600" }}>
+                      Status: {isActive ? "Active" : "Inactive"}
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      {String(storeStatusUpdatingId) === String(store.id) && (
+                        <span style={{ color: "#64748B", fontSize: "11px" }}>Updating…</span>
+                      )}
+                      <StoreStatusToggle
+                        store={store}
+                        loading={String(storeStatusUpdatingId) === String(store.id)}
+                        onToggle={requestStoreStatusChange}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label style={{ fontSize: '10px', color: '#64748B', fontWeight: '700' }}>MONTHLY CAP</label>
-                    <input 
-                      type="number" 
-                      // Fallback to 1000 if cap is missing
-                      defaultValue={store.monthly_cap || 1000} 
-                      style={{ ...styles.textInput, width: '100%', padding: '5px', fontSize: '12px', marginTop: '4px' }}
-                      onBlur={(e) => handleUpdateStoreAutomation(store.id, { monthly_cap: parseInt(e.target.value) || 1000 })} 
-                    />
-                  </div>
-                </div>
-
-                {/* ℹ️ Visual Feedback for Super Admin */}
-                <div style={{ marginTop: '10px', borderTop: '1px dashed #e2e8f0', paddingTop: '8px' }}>
-                  {!canEnableAutomation ? (
-                    <p style={{ color: '#ef4444', fontSize: '10px', margin: 0, fontWeight: '800' }}>
-                      ❌ SETUP PENDING: {!hasManager ? 'Create DM' : 'Link Partner'}
-                    </p>
-                  ) : (
-                    <p style={{ color: '#10B981', fontSize: '10px', margin: 0, fontWeight: '800' }}>
-                      ✅ SETUP COMPLETE
-                    </p>
-                  )}
-                </div>
+                )}
               </div>
 
-              {/* --- 🛠 ACTIONS --- */}
+              {/* CLEAN ACTION BUTTONS */}
               <div style={stylesGrid.actionRow}>
                 <button
+                  type="button"
                   style={{ ...stylesGrid.actionBtn, backgroundColor: "#0F766E" }}
                   onClick={() => {
                     setSelectedStoreForDetails(store);
@@ -7676,23 +8195,21 @@ const renderActiveStoresList = () => {
                   View Details
                 </button>
                 <button
-                  style={{ ...stylesGrid.actionBtn, backgroundColor: "#6366F1" }}
-                  onClick={() => {
-                    setEditingStore(store);
-                    setEditStoreName(store.store_name);
-                    setEditStoreAddress(store.address || "");
-                    setEditStoreCity(store.city || "");
-                    setIsEditStoreModalVisible(true);
-                  }}
+                  type="button"
+                  style={{ ...stylesGrid.actionBtn, backgroundColor: "#4F46E5" }}
+                  onClick={() => handleOpenEditStore(store)}
                 >
-                  ✏️ Edit Info
+                  Edit Info
                 </button>
-                <button
-                  style={{ ...stylesGrid.actionBtn, backgroundColor: "#E74C3C" }}
-                  onClick={() => handleDeleteStore(store.id)}
-                >
-                  🗑️ Delete
-                </button>
+                {!isEmployeeRole && (
+                  <button
+                    type="button"
+                    style={{ ...stylesGrid.actionBtn, backgroundColor: "#DC2626", maxWidth: "60px" }}
+                    onClick={() => handleDeleteStore(store.id)}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -7703,9 +8220,61 @@ const renderActiveStoresList = () => {
 
   return (
     <div style={styles.contentArea}>
-      <h2 style={styles.pageTitle}>
-        Store Management ({allStores.length} Total Stores)
-      </h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "14px", marginBottom: "16px" }}>
+        <div>
+          <h2 style={{ ...styles.pageTitle, margin: 0 }}>
+            Store Management
+          </h2>
+          <p style={{ margin: "4px 0 0", color: "#64748B", fontSize: "14px" }}>
+            {filteredStoreManagementList.length} of {allStores.length} stores showing
+          </p>
+        </div>
+
+        {!isEmployeeRole && (
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              disabled={isDownloadingTemplate}
+              style={{
+                ...styles.button,
+                margin: 0,
+                width: "auto",
+                padding: "9px 15px",
+                backgroundColor: "#16A34A",
+                color: "#FFFFFF",
+                fontWeight: "700",
+                fontSize: "13px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                cursor: isDownloadingTemplate ? "wait" : "pointer",
+              }}
+            >
+              {isDownloadingTemplate ? "Downloading…" : "📥 Download Template"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsBulkUploadModalOpen(true)}
+              style={{
+                ...styles.button,
+                margin: 0,
+                width: "auto",
+                padding: "9px 15px",
+                backgroundColor: "#2563EB",
+                color: "#FFFFFF",
+                fontWeight: "700",
+                fontSize: "13px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              📤 Bulk Upload Stores
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* ADD STORE FORM */}
       <div style={styles.formCard}>
@@ -7791,39 +8360,32 @@ const renderActiveStoresList = () => {
         </div>
       )}
 
-      {storeQrNotice && (
-        <div
-          role={storeQrNotice.type === "error" ? "alert" : "status"}
-          style={{
-            position: "fixed",
-            top: "76px",
-            right: "20px",
-            zIndex: 2100,
-            maxWidth: "420px",
-            padding: "12px 16px",
-            borderRadius: "10px",
-            backgroundColor: storeQrNotice.type === "error" ? "#FEE2E2" : "#DCFCE7",
-            color: storeQrNotice.type === "error" ? "#991B1B" : "#166534",
-            fontWeight: "700",
-            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.18)",
-          }}
-        >
-          {String(storeQrNotice.message ?? "")}
-        </div>
-      )}
-
+      {/* SEARCH AND FILTERS */}
       <div style={{ ...styles.formCard, display: "flex", gap: "16px", alignItems: "flex-end", flexWrap: "wrap" }}>
-        <label style={{ flex: "1 1 320px", color: "#334155", fontSize: "13px", fontWeight: "700" }}>
+        <label style={{ flex: "1 1 300px", color: "#334155", fontSize: "13px", fontWeight: "700" }}>
           Search Stores
           <input
             type="search"
             value={storeManagementSearch}
             onChange={(event) => setStoreManagementSearch(event.target.value)}
-            placeholder="Search by store, ID, city, state, address, channel, or manager"
+            placeholder="Search by ID, name, city, state, address, channel, vendor, POC"
             style={{ ...styles.textInput, width: "100%", marginTop: "6px" }}
           />
         </label>
-        <label style={{ flex: "0 1 220px", color: "#334155", fontSize: "13px", fontWeight: "700" }}>
+        <label style={{ flex: "0 1 180px", color: "#334155", fontSize: "13px", fontWeight: "700" }}>
+          Channel
+          <select
+            value={storeFilterChannel}
+            onChange={(event) => setStoreFilterChannel(event.target.value)}
+            style={{ ...styles.textInput, width: "100%", marginTop: "6px" }}
+          >
+            <option value="ALL">All Channels</option>
+            {CANONICAL_CHANNELS.map((ch) => (
+              <option key={ch} value={ch}>{ch}</option>
+            ))}
+          </select>
+        </label>
+        <label style={{ flex: "0 1 180px", color: "#334155", fontSize: "13px", fontWeight: "700" }}>
           Status
           <select
             value={storeStatusFilter}
@@ -7840,79 +8402,11 @@ const renderActiveStoresList = () => {
         </span>
       </div>
 
-      <CollapsibleChannelSection
-        title="⚠️ Stores Requiring Assignment"
-        totalCount={storesRequiringAssignment.length}
-        defaultOpen={false}
-        headerAction={(
-          <button
-            type="button"
-            onClick={handleExportStoresRequiringAssignment}
-            style={{
-              ...styles.button,
-              margin: 0,
-              width: "auto",
-              padding: "8px 12px",
-              backgroundColor: "#217346",
-              color: "#fff",
-              fontSize: "12px",
-            }}
-          >
-            📥 Export Excel
-          </button>
-        )}
-      >
-        <div style={stylesGrid.gridContainer}>
-          {storesRequiringAssignment.map((store) => {
-            const assignment = getStoreAssignmentStatus(store);
-            const missingLabel = assignment.missingManager && assignment.missingPoc
-              ? "Missing Manager & Missing POC"
-              : assignment.missingManager
-                ? "Missing Manager"
-                : "Missing POC";
-
-            return (
-              <div key={`assignment-${store.id}`} style={stylesGrid.storeCard}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
-                  <div style={stylesGrid.storeTitle}>{store.store_name}</div>
-                  <span style={{
-                    padding: "4px 8px",
-                    borderRadius: "999px",
-                    background: "#FEE2E2",
-                    color: "#B91C1C",
-                    fontSize: "11px",
-                    fontWeight: "800",
-                    whiteSpace: "nowrap",
-                  }}>
-                    {missingLabel}
-                  </span>
-                </div>
-                <div style={stylesGrid.storeSub}><strong>Store ID:</strong> {store.id}</div>
-                <div style={stylesGrid.storeSub}><strong>City:</strong> {store.city || "N/A"}</div>
-                <div style={stylesGrid.storeSub}><strong>Channel:</strong> {store.channel || "GENERAL"}</div>
-                <div style={stylesGrid.storeSub}>
-                  <strong>Delivery Manager:</strong>{" "}
-                  <span style={assignment.missingManager ? { color: "#DC2626", fontWeight: "700" } : undefined}>
-                    {assignment.managerName}
-                  </span>
-                </div>
-                <div style={stylesGrid.storeSub}>
-                  <strong>POC:</strong>{" "}
-                  <span style={assignment.missingPoc ? { color: "#DC2626", fontWeight: "700" } : undefined}>
-                    {assignment.pocName}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CollapsibleChannelSection>
-
       {/* CHANNEL SECTIONS */}
       {channels.map(channel => renderChannelSection(storesByChannel[channel], channel))}
       {channels.length === 0 && (
         <div style={{ ...styles.formCard, textAlign: "center", color: "#64748B" }}>
-          No stores match the current search and status filter.
+          No stores match the current search and filters.
         </div>
       )}
 
@@ -7927,89 +8421,6 @@ const renderActiveStoresList = () => {
         canUpdateStatus={canUpdateStoreStatus}
       />
 
-      {storeQrModal && (
-        <div style={styles.modalStyles.backdrop} role="dialog" aria-modal="true" aria-labelledby="store-qr-modal-title">
-          <div style={{ ...styles.modalStyles.modal, width: "520px", maxWidth: "calc(100vw - 32px)" }}>
-            <h3 id="store-qr-modal-title" style={styles.modalStyles.title}>Store QR</h3>
-            <div style={{ marginBottom: "16px" }}>
-              <p style={{ margin: "4px 0", color: "#334155" }}>
-                <strong>Store Name:</strong> {String(storeQrModal.store.store_name || "N/A")}
-              </p>
-              <p style={{ margin: "4px 0", color: "#334155" }}>
-                <strong>Outlet ID:</strong> {String(storeQrModal.store.id)}
-              </p>
-            </div>
-            <div style={{ display: "flex", justifyContent: "center", padding: "20px", backgroundColor: "#F8FAFC", borderRadius: "12px" }}>
-              <img
-                src={storeQrModal.imageUrl}
-                alt={`QR code for ${storeQrModal.store.store_name}`}
-                style={{ width: "100%", maxWidth: "300px", height: "auto", display: "block" }}
-              />
-            </div>
-            <div style={{ ...styles.modalStyles.actions, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                style={{ ...styles.modalStyles.submitButton, backgroundColor: "#2563EB" }}
-                onClick={() => {
-                  const link = document.createElement("a");
-                  link.href = storeQrModal.imageUrl;
-                  link.download = storeQrModal.filename;
-                  document.body.appendChild(link);
-                  link.click();
-                  link.remove();
-                }}
-              >
-                Download PNG
-              </button>
-              <button
-                type="button"
-                style={{ ...styles.modalStyles.submitButton, backgroundColor: "#D97706" }}
-                disabled={Boolean(storeQrLoadingIds[String(storeQrModal.store.id)])}
-                onClick={() => setPendingStoreQrRotation(storeQrModal.store)}
-              >
-                Rotate QR
-              </button>
-              <button
-                type="button"
-                style={styles.modalStyles.cancelButton}
-                onClick={() => setStoreQrModal(null)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {pendingStoreQrRotation && (
-        <div style={{ ...styles.modalStyles.backdrop, zIndex: 2200 }} role="dialog" aria-modal="true" aria-labelledby="rotate-store-qr-title">
-          <div style={{ ...styles.modalStyles.modal, width: "480px", maxWidth: "calc(100vw - 32px)" }}>
-            <h3 id="rotate-store-qr-title" style={styles.modalStyles.title}>Rotate QR?</h3>
-            <p style={{ color: "#475569", lineHeight: 1.6 }}>
-              Previously printed QR codes will stop working.
-            </p>
-            <div style={styles.modalStyles.actions}>
-              <button
-                type="button"
-                style={styles.modalStyles.cancelButton}
-                disabled={Boolean(storeQrLoadingIds[String(pendingStoreQrRotation.id)])}
-                onClick={() => setPendingStoreQrRotation(null)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                style={{ ...styles.modalStyles.submitButton, backgroundColor: "#D97706" }}
-                disabled={Boolean(storeQrLoadingIds[String(pendingStoreQrRotation.id)])}
-                onClick={confirmStoreQrRotation}
-              >
-                {storeQrLoadingIds[String(pendingStoreQrRotation.id)] ? "Rotating…" : "Rotate QR"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {canUpdateStoreStatus && pendingStoreStatusChange && (
         <div style={styles.modalStyles.backdrop} role="dialog" aria-modal="true" aria-labelledby="store-status-dialog-title">
           <div style={{ ...styles.modalStyles.modal, width: "520px", maxWidth: "calc(100vw - 32px)" }}>
@@ -8017,24 +8428,9 @@ const renderActiveStoresList = () => {
               {pendingStoreStatusChange.nextActive ? "Activate Store?" : "Deactivate Store?"}
             </h3>
             {pendingStoreStatusChange.nextActive ? (
-              <>
-                <p>This store will again participate in:</p>
-                <ul style={{ lineHeight: 1.8 }}>
-                  <li>Auto Orders</li>
-                  <li>Manual Orders</li>
-                  <li>Reports</li>
-                </ul>
-              </>
+              <p>This store will be marked as Active.</p>
             ) : (
-              <>
-                <p>This store will:</p>
-                <ul style={{ lineHeight: 1.8 }}>
-                  <li>Stop automatic orders</li>
-                  <li>Reject manual orders</li>
-                  <li>Be excluded from automatic reports</li>
-                </ul>
-                <p>Historical orders will remain available.</p>
-              </>
+              <p>This store will be marked as Inactive. Historical orders will remain available.</p>
             )}
             <div style={styles.modalStyles.actions}>
               <button
@@ -8102,24 +8498,22 @@ const renderChannelAdmin = () => {
                                 </span>
                             </td>
 
-                            {/* ⭐ DELETE BUTTON HERE */}
                             <td style={styles.tableCell}>
-                                <button
-                                    onClick={() =>
-                                        handleDeleteChannelAdmin(admin.id, admin.full_name)
-                                    }
-                                    style={{
-                                        padding: "6px 14px",
-                                        backgroundColor: "#D32F2F",
-                                        color: "#fff",
-                                        border: "none",
-                                        borderRadius: "5px",
-                                        cursor: "pointer",
-                                        fontSize: "13px",
-                                    }}
-                                >
-                                    Delete
-                                </button>
+                                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                                    {String(admin.channel || "").toUpperCase() === "BLINKIT" && <button
+                                        type="button"
+                                        onClick={() => setChannelAdminForPermissions(admin)}
+                                        style={{ padding: "6px 14px", backgroundColor: "#1565C0", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontSize: "13px" }}
+                                    >
+                                        Manage Permissions
+                                    </button>}
+                                    <button
+                                        onClick={() => handleDeleteChannelAdmin(admin.id, admin.full_name)}
+                                        style={{ padding: "6px 14px", backgroundColor: "#D32F2F", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontSize: "13px" }}
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     ))
@@ -8142,6 +8536,11 @@ const renderChannelAdmin = () => {
             {/* Existing Admins List */}
             <h3 style={{...styles.cardTitle, borderLeft: '5px solid #1565C0', paddingLeft: '15px'}}>Existing Channel Admins</h3>
             {renderAdminTable()}
+
+            {channelAdminForPermissions && <ChannelAdminPermissionManager
+                admin={channelAdminForPermissions}
+                onClose={() => setChannelAdminForPermissions(null)}
+            />}
 
             {/* Create Admin Form */}
             <div style={styles.formCard}>
@@ -9118,12 +9517,47 @@ return (
 
     <EditStoreModal
       isVisible={isEditStoreModalVisible}
-      onClose={() => setIsEditStoreModalVisible(false)}
+      onClose={() => {
+        setIsEditStoreModalVisible(false);
+        setEditingStore(null);
+      }}
       onSubmit={handleEditStoreSubmit}
+      store={editingStore}
       name={editStoreName} setName={setEditStoreName}
-      address={editStoreAddress} setAddress={setEditStoreAddress}
+      region={editStoreRegion} setRegion={setEditStoreRegion}
+      entity={editStoreEntity} setEntity={setEditStoreEntity}
+      channel={editStoreChannel} setChannel={setEditStoreChannel}
+      projectCode={editStoreProjectCode} setProjectCode={setEditStoreProjectCode}
+      state={editStoreState} setState={setEditStoreState}
       city={editStoreCity} setCity={setEditStoreCity}
-      isLoading={loading} styles={styles}
+      address={editStoreAddress} setAddress={setEditStoreAddress}
+      zipCode={editStoreZipCode} setZipCode={setEditStoreZipCode}
+      lat={editStoreLat} setLat={setEditStoreLat}
+      long={editStoreLong} setLong={setEditStoreLong}
+      assignedManagerId={editStoreAssignedManagerId} setAssignedManagerId={setEditStoreAssignedManagerId}
+      pocName={editStorePocName} setPocName={setEditStorePocName}
+      pocPhone={editStorePocPhone} setPocPhone={setEditStorePocPhone}
+      isActive={editStoreIsActive} setIsActive={setEditStoreIsActive}
+      deliveryManagers={deliveryManagers}
+      isLoading={editStoreLoading}
+      styles={styles}
+    />
+
+    <BulkUploadModal
+      isVisible={isBulkUploadModalOpen}
+      onClose={handleCloseBulkUploadModal}
+      onDownloadTemplate={handleDownloadTemplate}
+      isDownloadingTemplate={isDownloadingTemplate}
+      file={bulkUploadFile}
+      setFile={setBulkUploadFile}
+      password={bulkUploadPassword}
+      setPassword={setBulkUploadPassword}
+      onSubmit={handleBulkUploadSubmit}
+      isLoading={bulkUploadLoading}
+      errors={bulkUploadErrors}
+      result={bulkUploadResult}
+      errorNotice={bulkUploadErrorNotice}
+      styles={styles}
     />
   </>
 );
