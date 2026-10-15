@@ -120,15 +120,30 @@ const SidebarMaterialIcon = ({ name }) => {
 };
 
 export const sidebarItemTab = (item) => {
-  if (item?.tab) return String(item.tab);
+  if (item?.tab) {
+    const rawTab = String(item.tab);
+    if (rawTab === "activeStores" || rawTab === "activeStoresList" || rawTab === "storeManagement") return "stores";
+    if (rawTab === "storeReimbursement" || rawTab === "store_reimbursement") return "storeReimbursements";
+    return rawTab;
+  }
+  if (item?.key && /^[a-z][A-Za-z0-9]*$/.test(String(item.key))) {
+    const rawKey = String(item.key);
+    if (rawKey === "activeStores" || rawKey === "activeStoresList" || rawKey === "storeManagement") return "stores";
+    if (rawKey === "storeReimbursement" || rawKey === "store_reimbursement") return "storeReimbursements";
+    return rawKey;
+  }
   const value = item?.key || item?.name || item?.route ||
     String(item?.permission || "").split(".")[0] || item?.module;
-  return String(value || "")
+  const tabName = String(value || "")
     .replace(/^\/+|\/+$/g, "")
     .split("/")
     .pop()
     .toLowerCase()
     .replace(/[\s_.-]+(.)/g, (_, character) => character.toUpperCase());
+
+  if (tabName === "activeStores" || tabName === "activeStoresList" || tabName === "storeManagement") return "stores";
+  if (tabName === "storeReimbursement" || tabName === "store_reimbursement") return "storeReimbursements";
+  return tabName;
 };
 
 export default function BackendSidebarItems({ currentTab, onSelectTab, renderItem, renderGroup }) {
@@ -140,6 +155,7 @@ export default function BackendSidebarItems({ currentTab, onSelectTab, renderIte
     if (firstTab) onSelectTab(firstTab);
   }, [currentTab, items, onSelectTab]);
 
+  const seenTabs = new Set();
   return groups.map(({ group, items: groupItems }) => {
     const visibleItems = groupItems.filter(isVisibleSidebarItem);
     if (!visibleItems.length) return null;
@@ -149,10 +165,19 @@ export default function BackendSidebarItems({ currentTab, onSelectTab, renderIte
       {visibleItems.map((item, index) => {
         const name = sidebarItemTab(item);
         if (!name) return null;
+        if (name === "stores" && seenTabs.has("stores")) return null;
+        seenTabs.add(name);
+
+        const displayLabel = name === "stores"
+          ? "Stores"
+          : name === "storeReimbursements"
+            ? "Store Reimbursement"
+            : item.module;
+
         return renderItem({
           item,
           name,
-          label: item.module,
+          label: displayLabel,
           icon: <SidebarMaterialIcon name={item.icon} />,
           active: currentTab === name,
           key: item.id || item.permission || item.module || index,

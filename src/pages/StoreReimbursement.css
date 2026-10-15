@@ -1,0 +1,348 @@
+/* Store Reimbursement Page Styling */
+
+.reimb-container {
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  font-family: inherit;
+}
+
+.reimb-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.reimb-title-block h1 {
+  font-size: 24px;
+  font-weight: 800;
+  color: #0F172A;
+  margin: 0;
+}
+
+.reimb-title-block p {
+  font-size: 14px;
+  color: #64748B;
+  margin: 4px 0 0;
+}
+
+.reimb-header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* Metric Cards */
+.reimb-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.reimb-metric-card {
+  background: #ffffff;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.reimb-metric-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.reimb-metric-val {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0F172A;
+}
+
+.reimb-metric-sub {
+  font-size: 12px;
+  color: #94A3B8;
+  margin-top: 4px;
+}
+
+/* Filter Toolbar */
+.reimb-toolbar {
+  background: #ffffff;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.reimb-toolbar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reimb-toolbar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.reimb-field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 4px;
+}
+
+.reimb-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  font-size: 13px;
+  box-sizing: border-box;
+  background-color: #ffffff;
+}
+
+/* Table Area */
+.reimb-table-card {
+  background: #ffffff;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+
+.reimb-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.reimb-table th {
+  background-color: #F8FAFC;
+  padding: 12px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.reimb-table td {
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #1E293B;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.reimb-table tr:hover td {
+  background-color: #F8FAFC;
+}
+
+/* Status Badges */
+.reimb-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.reimb-badge-pending {
+  background-color: #FEF3C7;
+  color: #B45309;
+}
+
+.reimb-badge-approved {
+  background-color: #EFF6FF;
+  color: #1D4ED8;
+}
+
+.reimb-badge-partially_paid {
+  background-color: #F0FDF4;
+  color: #15803D;
+  border: 1px solid #BBF7D0;
+}
+
+.reimb-badge-paid {
+  background-color: #DCFCE7;
+  color: #166534;
+}
+
+.reimb-badge-rejected {
+  background-color: #FEE2E2;
+  color: #B91C1C;
+}
+
+.reimb-badge-cancelled {
+  background-color: #F1F5F9;
+  color: #64748B;
+}
+
+/* Pagination */
+.reimb-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  background-color: #F8FAFC;
+  border-top: 1px solid #E2E8F0;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.reimb-page-btns {
+  display: flex;
+  gap: 8px;
+}
+
+/* Buttons */
+.reimb-btn-primary {
+  background-color: #2563EB;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reimb-btn-primary:hover {
+  background-color: #1D4ED8;
+}
+
+.reimb-btn-secondary {
+  background-color: #ffffff;
+  color: #475569;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reimb-btn-secondary:hover {
+  background-color: #F8FAFC;
+}
+
+.reimb-btn-success {
+  background-color: #16A34A;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reimb-btn-danger {
+  background-color: #DC2626;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Detail Drawer / Modal */
+.reimb-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 16px;
+}
+
+.reimb-modal-card {
+  background: #ffffff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 860px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.reimb-modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #E2E8F0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #F8FAFC;
+}
+
+.reimb-modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.reimb-modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #E2E8F0;
+  background-color: #F8FAFC;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* Ledger List */
+.reimb-ledger-item {
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  background-color: #F8FAFC;
+  margin-bottom: 8px;
+}
+
+/* Attachments */
+.reimb-attach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.reimb-attach-card {
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+  background-color: #ffffff;
+}

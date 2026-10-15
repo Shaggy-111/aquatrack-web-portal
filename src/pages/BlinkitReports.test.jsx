@@ -46,6 +46,15 @@ describe("BlinkitReports", () => {
     mockPermissions = []; render(<BlinkitReports />); expect(screen.getByText("Access denied test")).toBeTruthy(); expect(axios.get).not.toHaveBeenCalled();
   });
 
+  test("report actions remain independently permission controlled", async () => {
+    mockPermissions = ["blinkit_reports.view"];
+    render(<BlinkitReports />);
+    await screen.findByText("Anna Store");
+    expect(screen.queryByRole("button", { name: /Export.*Excel/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Upload Metadata" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Vendor Rate/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
+  });
   test("defaults to current IST range, removes Year Month and Status, and sends month contract", async () => {
     render(<BlinkitReports />); await screen.findByText("Anna Store"); const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); expect(screen.getByLabelText("From Date").value).toBe(`${today.slice(0, 7)}-01`); expect(screen.getByLabelText("To Date").value).toBe(today); expect(screen.queryByLabelText("Year")).toBeNull(); expect(screen.queryByLabelText("Month")).toBeNull(); expect(screen.queryByLabelText("Status")).toBeNull(); const params = monthlyCalls()[0][1].params; expect(params.year).toBe(Number(today.slice(0, 4))); expect(params.month).toBe(Number(today.slice(5, 7))); expect(params.status).toBeUndefined();
   });
@@ -110,3 +119,4 @@ describe("BlinkitReports", () => {
     render(<BlinkitReports />); await screen.findByText("Anna Store"); await screen.findByRole("option", { name: "AMB" }); fireEvent.change(screen.getByLabelText("Entity"), { target: { value: "AMB" } }); fireEvent.click(screen.getByRole("button", { name: "Apply" })); await waitFor(() => expect(monthlyCalls().at(-1)[1].params.entity).toBe("AMB"));
   });
 });
+

@@ -11,7 +11,7 @@ import AttendanceHistory from "./pages/AttendanceHistory";
 import LeaveManagement from "./pages/LeaveManagement";
 import HolidayManagement from "./pages/HolidayManagement";
 import usePermissions, { clearPermissionsCache } from "./hooks/usePermissions";
-import StoreComplianceDashboard from "./StoreComplianceDashboard";
+import StoreCompliance from "./pages/StoreCompliance";
 import { PERMISSIONS } from "./permissions";
 import AccessDenied from "./components/AccessDenied";
 import useSidebar, { clearSidebarCache } from "./hooks/useSidebar";
@@ -22,6 +22,9 @@ import LogoutConfirmationDialog from "./components/LogoutConfirmationDialog";
 import MonthlyVirtualCards from "./pages/MonthlyVirtualCards";
 import BlinkitReports from "./pages/BlinkitReports";
 import ChannelAdminPermissionManager from "./components/ChannelAdminPermissionManager";
+import StoreReimbursement from "./pages/StoreReimbursement";
+import StoreFilterToolbar from "./components/store/StoreFilterToolbar";
+import ExtractedStoreEditModal from "./components/store/StoreEditModal";
 
 const VENDOR_QR_URL = "https://veekayaquatech.com/vendor-info";
 
@@ -1430,6 +1433,11 @@ const [selectedDPId, setSelectedDPId] = useState("");
   const [selectedStoreForDetails, setSelectedStoreForDetails] = useState(null);
   const [storeManagementSearch, setStoreManagementSearch] = useState("");
   const [storeStatusFilter, setStoreStatusFilter] = useState("ALL");
+  const [storeFilterRegion, setStoreFilterRegion] = useState("ALL");
+  const [storeFilterEntity, setStoreFilterEntity] = useState("ALL");
+  const [storeFilterState, setStoreFilterState] = useState("ALL");
+  const [storeFilterCitySelection, setStoreFilterCitySelection] = useState("ALL");
+  const [storeFilterVendor, setStoreFilterVendor] = useState("ALL");
   const [storeStatusUpdatingId, setStoreStatusUpdatingId] = useState(null);
   const [pendingStoreStatusChange, setPendingStoreStatusChange] = useState(null);
   const [storeStatusNotice, setStoreStatusNotice] = useState(null);
@@ -7993,6 +8001,15 @@ const renderActiveStoresList = () => {
     if (storeStatusFilter === "ACTIVE" && !active) return false;
     if (storeStatusFilter === "INACTIVE" && active) return false;
     if (storeFilterChannel !== "ALL" && storeFilterChannel && String(store.channel || "GENERAL").toUpperCase() !== storeFilterChannel.toUpperCase()) return false;
+    if (storeFilterRegion !== "ALL" && storeFilterRegion && String(store.region || "").toUpperCase() !== storeFilterRegion.toUpperCase()) return false;
+    if (storeFilterEntity !== "ALL" && storeFilterEntity && String(store.entity || "") !== storeFilterEntity) return false;
+    if (storeFilterState !== "ALL" && storeFilterState && String(store.state || "") !== storeFilterState) return false;
+    if (storeFilterCitySelection !== "ALL" && storeFilterCitySelection && String(store.city || "").toLowerCase() !== storeFilterCitySelection.toLowerCase()) return false;
+    if (storeFilterVendor !== "ALL" && storeFilterVendor) {
+      const vendorId = String(store.assigned_manager_id || "");
+      const vendorName = String(store.assigned_manager || "");
+      if (vendorId !== storeFilterVendor && vendorName !== storeFilterVendor) return false;
+    }
     if (!normalizedStoreSearch) return true;
     return [
       store.id,
@@ -8001,8 +8018,10 @@ const renderActiveStoresList = () => {
       store.state,
       store.address,
       store.channel,
+      store.project_code,
       store.assigned_manager,
       store.poc_name,
+      store.poc_phone,
     ].some((value) => String(value || "").toLowerCase().includes(normalizedStoreSearch));
   });
 
@@ -8223,10 +8242,10 @@ const renderActiveStoresList = () => {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "14px", marginBottom: "16px" }}>
         <div>
           <h2 style={{ ...styles.pageTitle, margin: 0 }}>
-            Store Management
+            Stores
           </h2>
           <p style={{ margin: "4px 0 0", color: "#64748B", fontSize: "14px" }}>
-            {filteredStoreManagementList.length} of {allStores.length} stores showing
+            Manage store master data, POCs, vendor assignments and operational status.
           </p>
         </div>
 
@@ -8251,7 +8270,7 @@ const renderActiveStoresList = () => {
                 cursor: isDownloadingTemplate ? "wait" : "pointer",
               }}
             >
-              {isDownloadingTemplate ? "Downloading…" : "📥 Download Template"}
+              {isDownloadingTemplate ? "Downloading…" : "Download Template"}
             </button>
             <button
               type="button"
@@ -8270,10 +8289,32 @@ const renderActiveStoresList = () => {
                 gap: "6px",
               }}
             >
-              📤 Bulk Upload Stores
+              Bulk Upload
             </button>
           </div>
         )}
+      </div>
+
+      {/* SUMMARY KPI CARDS */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px", marginBottom: "16px" }}>
+        <div style={{ background: "#ffffff", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "14px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ fontSize: "12px", fontWeight: "700", color: "#64748B", textTransform: "uppercase" }}>Total Stores</div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0F172A", marginTop: "4px" }}>{allStores.length}</div>
+        </div>
+        <div style={{ background: "#ffffff", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "14px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ fontSize: "12px", fontWeight: "700", color: "#166534", textTransform: "uppercase" }}>Active Stores</div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#16A34A", marginTop: "4px" }}>{allStores.filter(isStoreActive).length}</div>
+        </div>
+        <div style={{ background: "#ffffff", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "14px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ fontSize: "12px", fontWeight: "700", color: "#991B1B", textTransform: "uppercase" }}>Inactive Stores</div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#DC2626", marginTop: "4px" }}>{allStores.filter(s => !isStoreActive(s)).length}</div>
+        </div>
+        <div style={{ background: "#ffffff", border: "1px solid #E2E8F0", borderRadius: "10px", padding: "14px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ fontSize: "12px", fontWeight: "700", color: "#2563EB", textTransform: "uppercase" }}>Vendors Assigned</div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#2563EB", marginTop: "4px" }}>
+            {new Set(allStores.map(s => s.assigned_manager_id).filter(Boolean)).size}
+          </div>
+        </div>
       </div>
 
       {/* ADD STORE FORM */}
@@ -8360,47 +8401,38 @@ const renderActiveStoresList = () => {
         </div>
       )}
 
-      {/* SEARCH AND FILTERS */}
-      <div style={{ ...styles.formCard, display: "flex", gap: "16px", alignItems: "flex-end", flexWrap: "wrap" }}>
-        <label style={{ flex: "1 1 300px", color: "#334155", fontSize: "13px", fontWeight: "700" }}>
-          Search Stores
-          <input
-            type="search"
-            value={storeManagementSearch}
-            onChange={(event) => setStoreManagementSearch(event.target.value)}
-            placeholder="Search by ID, name, city, state, address, channel, vendor, POC"
-            style={{ ...styles.textInput, width: "100%", marginTop: "6px" }}
-          />
-        </label>
-        <label style={{ flex: "0 1 180px", color: "#334155", fontSize: "13px", fontWeight: "700" }}>
-          Channel
-          <select
-            value={storeFilterChannel}
-            onChange={(event) => setStoreFilterChannel(event.target.value)}
-            style={{ ...styles.textInput, width: "100%", marginTop: "6px" }}
-          >
-            <option value="ALL">All Channels</option>
-            {CANONICAL_CHANNELS.map((ch) => (
-              <option key={ch} value={ch}>{ch}</option>
-            ))}
-          </select>
-        </label>
-        <label style={{ flex: "0 1 180px", color: "#334155", fontSize: "13px", fontWeight: "700" }}>
-          Status
-          <select
-            value={storeStatusFilter}
-            onChange={(event) => setStoreStatusFilter(event.target.value)}
-            style={{ ...styles.textInput, width: "100%", marginTop: "6px" }}
-          >
-            <option value="ALL">All</option>
-            <option value="ACTIVE">Active</option>
-            <option value="INACTIVE">Inactive</option>
-          </select>
-        </label>
-        <span style={{ color: "#64748B", fontSize: "13px", paddingBottom: "12px" }}>
-          {filteredStoreManagementList.length} stores
-        </span>
-      </div>
+      {/* SEARCH AND FILTERS TOOLBAR */}
+      <StoreFilterToolbar
+        searchTerm={storeManagementSearch}
+        onSearchChange={setStoreManagementSearch}
+        regionFilter={storeFilterRegion}
+        onRegionChange={setStoreFilterRegion}
+        channelFilter={storeFilterChannel}
+        onChannelChange={setStoreFilterChannel}
+        entityFilter={storeFilterEntity}
+        onEntityChange={setStoreFilterEntity}
+        stateFilter={storeFilterState}
+        onStateChange={setStoreFilterState}
+        cityFilter={storeFilterCitySelection}
+        onCityChange={setStoreFilterCitySelection}
+        vendorFilter={storeFilterVendor}
+        onVendorChange={setStoreFilterVendor}
+        statusFilter={storeStatusFilter}
+        onStatusChange={setStoreStatusFilter}
+        vendors={deliveryManagers}
+        totalCount={allStores.length}
+        filteredCount={filteredStoreManagementList.length}
+        onClearAll={() => {
+          setStoreManagementSearch("");
+          setStoreFilterRegion("ALL");
+          setStoreFilterChannel("ALL");
+          setStoreFilterEntity("ALL");
+          setStoreFilterState("ALL");
+          setStoreFilterCitySelection("ALL");
+          setStoreFilterVendor("ALL");
+          setStoreStatusFilter("ALL");
+        }}
+      />
 
       {/* CHANNEL SECTIONS */}
       {channels.map(channel => renderChannelSection(storesByChannel[channel], channel))}
@@ -9247,7 +9279,7 @@ const renderContent = () => {
   const activeSidebarItem = sidebarItems.find(
     (item) => sidebarItemTab(item) === currentTab
   );
-  if (activeSidebarItem?.permission && !hasPermission(activeSidebarItem.permission)) {
+  if (activeSidebarItem?.permission && !hasPermission(activeSidebarItem.permission) && !(currentTab === "storeCompliance" && isSuperAdminRole)) {
     return <AccessDenied />;
   }
 
@@ -9288,9 +9320,11 @@ const renderContent = () => {
     storeReports: renderReports,
     channelAdmin: renderChannelAdmin,
 
-    storeCompliance: () => <StoreComplianceDashboard />,
+    storeCompliance: () => <StoreCompliance />,
     monthlyVirtualCards: () => <MonthlyVirtualCards />,
     blinkitReports: () => <BlinkitReports />,
+    storeReimbursements: () => <StoreReimbursement />,
+    storeReimbursement: () => <StoreReimbursement />,
     employees: () => <Employee />,
     employeeManagement: () => <Employee />,
     attendance: () => <AttendanceDashboard />,
@@ -9316,7 +9350,7 @@ return (
   <>
     {/* --- MAIN DASHBOARD LAYOUT --- */}
     <div
-      className="dashboard-container"
+      className={`dashboard-container${currentTab === "storeCompliance" ? " sc-dashboard-shell" : ""}`}
       style={{ display: "flex", height: "100vh", overflow: "hidden" }}
     >
       {/* --- SIDEBAR --- */}
@@ -9515,7 +9549,7 @@ return (
     />
 
 
-    <EditStoreModal
+    <ExtractedStoreEditModal
       isVisible={isEditStoreModalVisible}
       onClose={() => {
         setIsEditStoreModalVisible(false);

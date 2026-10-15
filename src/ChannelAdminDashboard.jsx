@@ -3,6 +3,7 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from './config'; 
 import Reports from './pages/Reports';
+import BlinkitReports from './pages/BlinkitReports';
 import usePermissions, { clearPermissionsCache } from './hooks/usePermissions';
 import { PERMISSIONS } from './permissions';
 import BackendSidebarItems from './components/BackendSidebarItems';
@@ -1585,6 +1586,8 @@ const renderOrders = () => {
                         )}
                     </div>
                 );
+            case 'blinkitReports':
+                return <BlinkitReports />;
             case 'unassignedOrders':
                 return renderUnassignedOrders();
             default:
