@@ -1,3 +1,4 @@
+import { reimbursementError, buildReimbursementCreatePayload } from "../utils/reimbursementErrors";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import storeReimbursementService from "../services/storeReimbursementService";
 import usePermissions from "../hooks/usePermissions";
@@ -176,7 +177,7 @@ export default function StoreReimbursement() {
         setTotalPages(res.total_pages || 0);
       }
     } catch (err) {
-      if (request === listRequest.current) setListError(err.response?.data?.detail || "Failed to load reimbursement claims.");
+      if (request === listRequest.current) setListError(reimbursementError(err, "Failed to load reimbursement claims."));
     } finally {
       if (request === listRequest.current) setLoading(false);
     }
@@ -200,7 +201,7 @@ export default function StoreReimbursement() {
       const data = await storeReimbursementService.getDetail(id);
       setSelectedDetail(data);
     } catch (err) {
-      setErrorNotice(err.response?.data?.detail || "Failed to load claim detail.");
+      setErrorNotice(reimbursementError(err, "Failed to load claim detail."));
       setIsDetailOpen(false);
     } finally {
       setDetailLoading(false);
@@ -222,7 +223,7 @@ export default function StoreReimbursement() {
       });
       setSuccessNotice("Export downloaded successfully.");
     } catch (err) {
-      setErrorNotice(err.response?.data?.detail || "Export failed.");
+      setErrorNotice(reimbursementError(err, "Export failed."));
     }
   };
 
@@ -237,15 +238,15 @@ export default function StoreReimbursement() {
     setErrorNotice(null);
 
     try {
-      const payload = {
+      const payload = buildReimbursementCreatePayload({
         store_id: claimStoreId,
         purchase_date: claimPurchaseDate,
-        total_amount: Number(claimAmount),
+        total_amount: claimAmount,
         reason: claimReason,
-        poc_id: claimPocId ? Number(claimPocId) : undefined,
-        instructed_by_user_id: claimInstructedBy ? Number(claimInstructedBy) : undefined,
-        notes: claimNotes || undefined,
-      };
+        poc_id: claimPocId,
+        instructed_by_user_id: claimInstructedBy,
+        notes: claimNotes,
+      });
 
       const created = await storeReimbursementService.createReimbursement(payload);
 
@@ -256,7 +257,7 @@ export default function StoreReimbursement() {
           await storeReimbursementService.uploadAttachment(created.id, claimInitialFile, "INVOICE");
         } catch (uploadErr) {
           console.warn("Claim created but initial file upload failed", uploadErr);
-          fileUploadWarning = uploadErr.response?.data?.detail || uploadErr.message || "Initial attachment upload failed.";
+          fileUploadWarning = reimbursementError(uploadErr, "Initial attachment upload failed.");
         }
       }
 
@@ -281,7 +282,7 @@ export default function StoreReimbursement() {
       loadReimbursements();
       loadSummary();
     } catch (err) {
-      setErrorNotice(err.response?.data?.detail || "Failed to create reimbursement claim.");
+      setErrorNotice(reimbursementError(err, "Failed to create reimbursement claim."));
     } finally {
       setCreateSubmitting(false);
     }
@@ -326,7 +327,7 @@ export default function StoreReimbursement() {
         openDetail(editingClaim.id);
       }
     } catch (err) {
-      setErrorNotice(err.response?.data?.detail || "Failed to update reimbursement claim.");
+      setErrorNotice(reimbursementError(err, "Failed to update reimbursement claim."));
     } finally {
       setEditSubmitting(false);
     }
@@ -348,7 +349,7 @@ export default function StoreReimbursement() {
       setDetailUploadFile(null);
       openDetail(selectedDetail.id);
     } catch (err) {
-      setErrorNotice(err.response?.data?.detail || "Failed to upload attachment.");
+      setErrorNotice(reimbursementError(err, "Failed to upload attachment."));
     } finally {
       setDetailUploading(false);
     }
@@ -365,7 +366,7 @@ export default function StoreReimbursement() {
         openDetail(id);
       }
     } catch (err) {
-      setErrorNotice(err.response?.data?.detail || "Failed to approve claim.");
+      setErrorNotice(reimbursementError(err, "Failed to approve claim."));
     }
   };
 
@@ -404,7 +405,7 @@ export default function StoreReimbursement() {
         openDetail(promptAction.id);
       }
     } catch (err) {
-      setErrorNotice(err.response?.data?.detail || "Action failed.");
+      setErrorNotice(reimbursementError(err, "Action failed."));
     } finally {
       setPromptSubmitting(false);
     }
@@ -470,7 +471,7 @@ export default function StoreReimbursement() {
       loadSummary();
       openDetail(selectedDetail.id);
     } catch (err) {
-      setErrorNotice(err.response?.data?.detail || "Failed to record payment.");
+      setErrorNotice(reimbursementError(err, "Failed to record payment."));
     } finally {
       setPaymentSubmitting(false);
     }
@@ -505,7 +506,7 @@ export default function StoreReimbursement() {
   return (
     <div className="reimb-container">
       {/* NOTICES */}
-      {errorNotice && (
+      {errorNotice && !isCreateOpen && (
         <div
           role="alert"
           style={{
@@ -963,6 +964,7 @@ export default function StoreReimbursement() {
             </div>
             <form onSubmit={handleCreateSubmit}>
               <div className="reimb-modal-body">
+                {errorNotice && <div role="alert" className="reimb-error">{errorNotice}</div>}
                 <ReimbursementStoreSelector id="claim-store" title="Store *" controller={storeSelector} value={claimStore}
                   open={activeStoreSelector === "claim"} onOpen={() => setActiveStoreSelector("claim")} onClose={() => setActiveStoreSelector(null)}
                   onChange={(store) => { setClaimStore(store); setClaimStoreId(store?.id || ""); setClaimPocId(""); }} />
@@ -988,6 +990,7 @@ export default function StoreReimbursement() {
                     <label htmlFor="claim-amount" className="reimb-field-label">Total Amount (₹) *</label>
                     <input
                       id="claim-amount"
+                      min="0.01"
                       type="number"
                       step="0.01"
                       className="reimb-input"
@@ -1003,6 +1006,7 @@ export default function StoreReimbursement() {
                   <label htmlFor="claim-reason" className="reimb-field-label">Reason *</label>
                   <textarea
                     id="claim-reason"
+                    minLength={3}
                     className="reimb-input"
                     rows={2}
                     value={claimReason}

@@ -108,8 +108,30 @@ test("result errors stay local with retry; empty results are explicit", async ()
 });
 test("summary failure and claim failure have independent retries", async () => {
   service.getSummary.mockRejectedValueOnce(new Error("summary failed")).mockResolvedValue({ total_claims: 2 }); service.listReimbursements.mockRejectedValueOnce(new Error("claims failed")).mockResolvedValue(claims);
-  render(<StoreReimbursement />); await screen.findByText("Failed to load reimbursement summary."); await screen.findByText("Failed to load reimbursement claims."); const summaryCount = service.getSummary.mock.calls.length; fireEvent.click(screen.getByText("Retry claims")); await screen.findByText("CR-1"); expect(service.getSummary).toHaveBeenCalledTimes(summaryCount); fireEvent.click(screen.getByText("Retry summary")); await screen.findByText("Total Claims");
+  render(<StoreReimbursement />); await screen.findByText("Failed to load reimbursement summary."); await screen.findByText("claims failed"); const summaryCount = service.getSummary.mock.calls.length; fireEvent.click(screen.getByText("Retry claims")); await screen.findByText("CR-1"); expect(service.getSummary).toHaveBeenCalledTimes(summaryCount); fireEvent.click(screen.getByText("Retry summary")); await screen.findByText("Total Claims");
 });
 test("Employee shows only backend-returned Stores with no all-Store fallback", async () => {
   localStorage.setItem("user_role", "employee"); service.getStoreSelector.mockResolvedValue(result([stores[0]])); render(<StoreReimbursement />); await openFilter(); expect(screen.queryByRole("button", { name: "South Store (S2)" })).not.toBeInTheDocument(); expect(service.getStoreSelector).toHaveBeenCalledTimes(1); expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+});
+
+
+test.each([
+  [[{ loc: ["body", "reason"], msg: "Too short", type: "string_too_short", input: "x", ctx: {} }], "body.reason: Too short"],
+  [{ loc: ["body", "total_amount"], msg: "Must be positive" }, "body.total_amount: Must be positive"],
+])("422 failure preserves the form and renders text", async (detail, expected) => {
+  service.createReimbursement.mockRejectedValue({ response: { status: 422, data: { detail } } });
+  render(<StoreReimbursement />); await createForm();
+  fireEvent.click(screen.getByRole("button", { name: "North Store (S1)" }));
+  change("Purchase Date *", "2026-10-16"); change("Total Amount (\u20b9) *", "1500"); change("Reason *", "Local water");
+  fireEvent.click(screen.getByRole("button", { name: "Submit Claim" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(expected);
+  expect(screen.getByRole("heading", { name: "Store Reimbursement" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Reason *")).toHaveValue("Local water");
+  expect(screen.getByLabelText("Total Amount (\u20b9) *")).toHaveValue(1500);
+  expect(screen.getByLabelText("Purchase Date *")).toHaveValue("2026-10-16");
+  expect(screen.getByLabelText("Store *")).toHaveTextContent("North Store (S1)");
+  expect(screen.getByRole("button", { name: "Submit Claim" })).toBeEnabled();
+  const payload = service.createReimbursement.mock.calls[0][0];
+  expect(payload).toEqual({ store_id: "S1", purchase_date: "2026-10-16", total_amount: 1500, reason: "Local water" });
+  expect(payload).not.toHaveProperty("poc_id"); expect(payload).not.toHaveProperty("instructed_by_user_id");
 });
