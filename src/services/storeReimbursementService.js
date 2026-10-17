@@ -16,6 +16,19 @@ const getAuthHeaders = () => {
  * Connects to AquaTrack backend /store-reimbursements endpoints
  */
 export const storeReimbursementService = {
+  async getStoreSelector(params = {}) {
+    const supported = ["region", "channel", "state", "city", "search", "is_active", "page", "page_size"];
+    const cleaned = Object.fromEntries(supported.filter((key) => params[key] !== undefined && params[key] !== null && params[key] !== "").map((key) => [key, params[key]]));
+    const response = await axios.get(`${API_BASE_URL}/stores/selector`, { params: cleaned, headers: getAuthHeaders() });
+    return response.data;
+  },
+
+  async getStoreSelectorFilters(params = {}) {
+    const supported = ["region", "channel", "state"];
+    const cleaned = Object.fromEntries(supported.filter((key) => params[key] !== undefined && params[key] !== null && params[key] !== "").map((key) => [key, params[key]]));
+    const response = await axios.get(`${API_BASE_URL}/stores/selector/filters`, { params: cleaned, headers: getAuthHeaders() });
+    return response.data;
+  },
   /**
    * List reimbursements with filters and server pagination
    */

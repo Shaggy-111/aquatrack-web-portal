@@ -21,6 +21,16 @@ jest.mock("../config", () => ({ API_BASE_URL: "https://api.example.test" }));
 import storeReimbursementService from "./storeReimbursementService";
 
 describe("storeReimbursementService API Client", () => {
+  test("Store selector uses exact paged endpoint, preserves false and excludes unsupported filters", async () => {
+    mockAxiosGet.mockResolvedValue({ data: { items: [], page: 1, page_size: 20, has_more: false } });
+    await storeReimbursementService.getStoreSelector({ region: "NORTH", channel: "BLINKIT", state: "Delhi", city: "Delhi", search: "STR", page: 1, page_size: 20, is_active: false, entity: "ignored", empty: "" });
+    expect(mockAxiosGet).toHaveBeenCalledWith("https://api.example.test/stores/selector", { params: { region: "NORTH", channel: "BLINKIT", state: "Delhi", city: "Delhi", search: "STR", page: 1, page_size: 20, is_active: false }, headers: { Authorization: "Bearer test-token-xyz" } });
+  });
+  test("Store filter metadata sends only region/channel/state", async () => {
+    mockAxiosGet.mockResolvedValue({ data: { regions: [], channels: [], states: [], cities: [] } });
+    await storeReimbursementService.getStoreSelectorFilters({ region: "SOUTH", channel: "ZEPTO", state: "Karnataka", city: "ignored", search: "ignored" });
+    expect(mockAxiosGet).toHaveBeenCalledWith("https://api.example.test/stores/selector/filters", { params: { region: "SOUTH", channel: "ZEPTO", state: "Karnataka" }, headers: { Authorization: "Bearer test-token-xyz" } });
+  });
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem("auth_token", "test-token-xyz");

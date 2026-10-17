@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import axios from "axios";
-import { API_BASE_URL } from "../config";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import storeReimbursementService from "../services/storeReimbursementService";
 import usePermissions from "../hooks/usePermissions";
 import { PERMISSIONS } from "../permissions";
+import useReimbursementStoreSelector from "../hooks/useReimbursementStoreSelector";
+import ReimbursementStoreSelector from "../components/store/ReimbursementStoreSelector";
 import "./StoreReimbursement.css";
 
 const CANONICAL_REGIONS = ["NORTH", "SOUTH", "EAST", "WEST", "CENTRAL"];
@@ -52,6 +52,11 @@ export default function StoreReimbursement() {
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState(null);
+  const [listError, setListError] = useState(null);
+  const summaryRequest = useRef(0);
+  const listRequest = useRef(0);
   const [errorNotice, setErrorNotice] = useState(null);
   const [successNotice, setSuccessNotice] = useState(null);
 
@@ -66,8 +71,11 @@ export default function StoreReimbursement() {
   const [purchaseDateTo, setPurchaseDateTo] = useState("");
   const [outstandingOnly, setOutstandingOnly] = useState(false);
 
-  // Available store scoping
-  const [availableStores, setAvailableStores] = useState([]);
+  // A small, backend-scoped selector is independent of claim list/summary filters.
+  const storeSelector = useReimbursementStoreSelector(canView);
+  const [activeStoreSelector, setActiveStoreSelector] = useState(null);
+  const [filterStore, setFilterStore] = useState(null);
+  const [claimStore, setClaimStore] = useState(null);
 
   // Modals state
   const [selectedDetail, setSelectedDetail] = useState(null);
@@ -120,32 +128,11 @@ export default function StoreReimbursement() {
   const [detailUploadType, setDetailUploadType] = useState("INVOICE");
   const [detailUploading, setDetailUploading] = useState(false);
 
-  // Fetch available stores (SuperAdmin: /stores, Employee: /employees/me/stores)
-  useEffect(() => {
-    const fetchStores = async () => {
-      try {
-        const token =
-          localStorage.getItem("auth_token") ||
-          localStorage.getItem("userToken") ||
-          localStorage.getItem("partner_token");
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-        const endpoint = isSuperAdmin
-          ? `${API_BASE_URL}/store/all`
-          : `${API_BASE_URL}/employees/me/stores`;
-
-        const res = await axios.get(endpoint, { headers });
-        const data = Array.isArray(res.data) ? res.data : (res.data?.stores || res.data?.items || []);
-        setAvailableStores(data);
-      } catch (err) {
-        console.error("Failed to load scoped stores", err);
-      }
-    };
-    fetchStores();
-  }, [isSuperAdmin]);
-
   // Load summary metrics
   const loadSummary = useCallback(async () => {
+    const request = ++summaryRequest.current;
+    setSummaryLoading(true);
+    setSummaryError(null);
     try {
       const res = await storeReimbursementService.getSummary({
         search: searchTerm,
@@ -156,16 +143,19 @@ export default function StoreReimbursement() {
         purchase_date_from: purchaseDateFrom || undefined,
         purchase_date_to: purchaseDateTo || undefined,
       });
-      setSummary(res);
+      if (request === summaryRequest.current) setSummary(res);
     } catch (err) {
-      console.error("Failed to load summary", err);
+      if (request === summaryRequest.current) setSummaryError("Failed to load reimbursement summary.");
+    } finally {
+      if (request === summaryRequest.current) setSummaryLoading(false);
     }
   }, [searchTerm, storeIdFilter, regionFilter, channelFilter, entityFilter, purchaseDateFrom, purchaseDateTo]);
 
   // Load table records
   const loadReimbursements = useCallback(async () => {
+    const request = ++listRequest.current;
     setLoading(true);
-    setErrorNotice(null);
+    setListError(null);
     try {
       const res = await storeReimbursementService.listReimbursements({
         page,
@@ -180,22 +170,27 @@ export default function StoreReimbursement() {
         purchase_date_to: purchaseDateTo || undefined,
         outstanding_only: outstandingOnly || undefined,
       });
-      setItems(res.items || []);
-      setTotal(res.total || 0);
-      setTotalPages(res.total_pages || 0);
+      if (request === listRequest.current) {
+        setItems(res.items || []);
+        setTotal(res.total || 0);
+        setTotalPages(res.total_pages || 0);
+      }
     } catch (err) {
-      setErrorNotice(err.response?.data?.detail || "Failed to load reimbursement claims.");
+      if (request === listRequest.current) setListError(err.response?.data?.detail || "Failed to load reimbursement claims.");
     } finally {
-      setLoading(false);
+      if (request === listRequest.current) setLoading(false);
     }
   }, [page, pageSize, searchTerm, statusFilter, storeIdFilter, regionFilter, channelFilter, entityFilter, purchaseDateFrom, purchaseDateTo, outstandingOnly]);
 
   useEffect(() => {
-    if (canView) {
-      loadReimbursements();
-      loadSummary();
-    }
-  }, [canView, loadReimbursements, loadSummary]);
+    if (canView) loadReimbursements();
+    return () => { listRequest.current += 1; };
+  }, [canView, loadReimbursements]);
+
+  useEffect(() => {
+    if (canView) loadSummary();
+    return () => { summaryRequest.current += 1; };
+  }, [canView, loadSummary]);
 
   // Load claim detail
   const openDetail = async (id) => {
@@ -234,6 +229,10 @@ export default function StoreReimbursement() {
   // Handle Create Claim
   const handleCreateSubmit = async (e) => {
     e.preventDefault();
+    if (!claimStoreId) {
+      setErrorNotice("Choose a Store before submitting the claim.");
+      return;
+    }
     setCreateSubmitting(true);
     setErrorNotice(null);
 
@@ -269,6 +268,8 @@ export default function StoreReimbursement() {
       setIsCreateOpen(false);
       // Reset form
       setClaimStoreId("");
+      setClaimStore(null);
+      setActiveStoreSelector(null);
       setClaimPurchaseDate("");
       setClaimAmount("");
       setClaimReason("");
@@ -480,6 +481,7 @@ export default function StoreReimbursement() {
     setSearchTerm("");
     setStatusFilter("ALL");
     setStoreIdFilter("");
+    setFilterStore(null);
     setRegionFilter("ALL");
     setChannelFilter("ALL");
     setEntityFilter("ALL");
@@ -568,7 +570,7 @@ export default function StoreReimbursement() {
           {canCreate && (
             <button
               type="button"
-              onClick={() => setIsCreateOpen(true)}
+              onClick={() => { setActiveStoreSelector(null); setIsCreateOpen(true); }}
               className="reimb-btn-primary"
             >
               + Create Claim
@@ -578,7 +580,9 @@ export default function StoreReimbursement() {
       </div>
 
       {/* SUMMARY METRIC CARDS */}
-      {summary && (
+      {summaryLoading && <p role="status">Loading reimbursement summary…</p>}
+      {summaryError && <div role="alert">{summaryError} <button type="button" className="reimb-btn-secondary" onClick={loadSummary}>Retry summary</button></div>}
+      {!summaryLoading && !summaryError && summary && (
         <div className="reimb-metrics-grid">
           <div className="reimb-metric-card">
             <div className="reimb-metric-label">Total Claims</div>
@@ -649,21 +653,9 @@ export default function StoreReimbursement() {
           </div>
 
           {/* Store Selector */}
-          <div>
-            <label className="reimb-field-label">Store</label>
-            <select
-              className="reimb-input"
-              value={storeIdFilter}
-              onChange={(e) => setStoreIdFilter(e.target.value)}
-            >
-              <option value="">All Accessible Stores</option>
-              {availableStores.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.store_name} ({s.id})
-                </option>
-              ))}
-            </select>
-          </div>
+          <ReimbursementStoreSelector id="reimb-filter-store" title="Store" controller={storeSelector} value={filterStore}
+            open={activeStoreSelector === "filter"} onOpen={() => setActiveStoreSelector("filter")} onClose={() => setActiveStoreSelector(null)}
+            onChange={(store) => { setFilterStore(store); setStoreIdFilter(store?.id || ""); setPage(1); }} />
 
           {/* Status */}
           <div>
@@ -740,6 +732,7 @@ export default function StoreReimbursement() {
       </div>
 
       {/* TABLE */}
+      {listError && <div role="alert">{listError} <button type="button" className="reimb-btn-secondary" onClick={loadReimbursements}>Retry claims</button></div>}
       <div className="reimb-table-card">
         <div style={{ overflowX: "auto" }}>
           <table className="reimb-table">
@@ -763,7 +756,7 @@ export default function StoreReimbursement() {
                     Loading claims...
                   </td>
                 </tr>
-              ) : items.length === 0 ? (
+              ) : listError ? <tr><td colSpan="9">Claims are unavailable. Retry to load them.</td></tr> : items.length === 0 ? (
                 <tr>
                   <td colSpan="9" style={{ textAlign: "center", padding: "30px", color: "#64748B" }}>
                     No reimbursement claims found.
@@ -970,22 +963,13 @@ export default function StoreReimbursement() {
             </div>
             <form onSubmit={handleCreateSubmit}>
               <div className="reimb-modal-body">
+                <ReimbursementStoreSelector id="claim-store" title="Store *" controller={storeSelector} value={claimStore}
+                  open={activeStoreSelector === "claim"} onOpen={() => setActiveStoreSelector("claim")} onClose={() => setActiveStoreSelector(null)}
+                  onChange={(store) => { setClaimStore(store); setClaimStoreId(store?.id || ""); setClaimPocId(""); }} />
                 <div>
-                  <label htmlFor="claim-store" className="reimb-field-label">Store *</label>
-                  <select
-                    id="claim-store"
-                    className="reimb-input"
-                    value={claimStoreId}
-                    onChange={(e) => setClaimStoreId(e.target.value)}
-                    required
-                  >
-                    <option value="">-- Select Store --</option>
-                    {availableStores.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.store_name} ({s.id})
-                      </option>
-                    ))}
-                  </select>
+                  <label htmlFor="claim-poc" className="reimb-field-label">POC ID (Optional)</label>
+                  <input id="claim-poc" type="number" min="1" step="1" className="reimb-input" value={claimPocId} onChange={(event) => setClaimPocId(event.target.value)} />
+                  <p className="reimb-selector-help">Leave blank when the Store has exactly one POC; the backend resolves it. If multiple POCs exist, enter the intended POC ID. The backend validates the Store mapping.</p>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>

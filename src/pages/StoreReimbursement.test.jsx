@@ -142,6 +142,8 @@ jest.mock("../services/storeReimbursementService", () => {
       uploadAttachment: jest.fn(),
       voidAttachment: jest.fn(),
       exportReimbursements: jest.fn(),
+      getStoreSelector: jest.fn(),
+      getStoreSelectorFilters: jest.fn(),
     },
   };
 });
@@ -176,6 +178,11 @@ describe("StoreReimbursement comprehensive verification", () => {
     storeReimbursementService.getSummary.mockResolvedValue(mockSummaryData);
     storeReimbursementService.listReimbursements.mockResolvedValue(mockListResponseData);
     storeReimbursementService.getDetail.mockResolvedValue(mockDetailData);
+    storeReimbursementService.getStoreSelector.mockResolvedValue({ items: [
+      { id: "STR-001", store_name: "Blinkit Koramangala" },
+      { id: "STR-002", store_name: "Zepto Indiranagar" },
+    ], page: 1, page_size: 20, has_more: false });
+    storeReimbursementService.getStoreSelectorFilters.mockResolvedValue({ regions: [], channels: [], states: [], cities: [] });
   });
 
   afterEach(() => {
@@ -213,10 +220,11 @@ describe("StoreReimbursement comprehensive verification", () => {
     expect(screen.getByText("Submit Reimbursement Claim")).toBeInTheDocument();
 
     // Wait for store options to load
-    await screen.findAllByRole("option", { name: /Blinkit Koramangala \(STR-001\)/i });
+    fireEvent.click(screen.getByLabelText(/Store \*/i));
+    await screen.findByRole("button", { name: /Blinkit Koramangala \(STR-001\)/i });
 
     // Fill form
-    fireEvent.change(screen.getByLabelText(/Store \*/i), { target: { value: "STR-001" } });
+    fireEvent.click(screen.getByRole("button", { name: /Blinkit Koramangala \(STR-001\)/i }));
     fireEvent.change(screen.getByLabelText(/Purchase Date \*/i), { target: { value: "2026-01-20" } });
     fireEvent.change(screen.getByLabelText(/Total Amount \(₹\) \*/i), { target: { value: "1250" } });
     fireEvent.change(screen.getByLabelText(/Reason \*/i), {
@@ -526,17 +534,14 @@ describe("StoreReimbursement comprehensive verification", () => {
     expect(await screen.findByText("Export downloaded successfully.")).toBeInTheDocument();
   });
 
-  test("11. Employee role fetches scoped stores from /employees/me/stores and limits cancellation", async () => {
+  test("11. Employee role uses backend-scoped selector and limits cancellation", async () => {
     localStorage.setItem("user_role", "employee");
     localStorage.setItem("user_id", "99"); // not owner of claim 101, 102, or 103
 
     render(<StoreReimbursement />);
 
     await waitFor(() => {
-      expect(mockAxiosGet).toHaveBeenCalledWith(
-        expect.stringContaining("/employees/me/stores"),
-        expect.any(Object)
-      );
+      expect(storeReimbursementService.getStoreSelector).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 20 }));
     });
 
     await screen.findByText("CR-2026-0001");
